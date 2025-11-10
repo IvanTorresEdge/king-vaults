@@ -1,0 +1,60 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+test = "test"
+script = "script"
+
+# Solidity compiler version
+solc_version = "0.8.30"
+
+# Optimizer settings
+optimizer = true
+optimizer_runs = 200
+
+# EVM version
+evm_version = "cancun"
+
+# Formatting
+line_length = 120
+tab_width = 4
+bracket_spacing = false
+int_types = "long"
+
+# Testing
+fuzz = { runs = 256 }
+invariant = { runs = 256, depth = 15 }
+
+# Gas reports
+gas_reports = ["*"]
+
+# Additional settings
+via_ir = false
+bytecode_hash = "none"
+cbor_metadata = false
+
+[profile.ci]
+fuzz = { runs = 10000 }
+invariant = { runs = 1000 }
+
+[profile.lite]
+optimizer = false
+optimizer_runs = 0
+
+# RPC endpoints (add your own)
+[rpc_endpoints]
+mainnet = "${MAINNET_RPC_URL}"
+sepolia = "${SEPOLIA_RPC_URL}"
+arbitrum = "${ARBITRUM_RPC_URL}"
+optimism = "${OPTIMISM_RPC_URL}"
+base = "${BASE_RPC_URL}"
+
+# Etherscan API keys (add your own)
+[etherscan]
+mainnet = { key = "${ETHERSCAN_API_KEY}" }
+sepolia = { key = "${ETHERSCAN_API_KEY}" }
+arbitrum = { key = "${ARBISCAN_API_KEY}" }
+optimism = { key = "${OPTIMISTIC_ETHERSCAN_API_KEY}" }
+base = { key = "${BASESCAN_API_KEY}" }
+
+# See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
