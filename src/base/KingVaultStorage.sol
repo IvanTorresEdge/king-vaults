@@ -4,6 +4,8 @@ pragma solidity ^0.8.25;
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import {IKingVault} from "../interfaces/IKingVault.sol";
 import {Governable} from "../governance/Governable.sol";
 
 /**
@@ -82,6 +84,126 @@ abstract contract KingVaultStorage is
      * @dev Critical for UUPS upgradeability pattern
      */
     uint256[50] private __gap;
+
+    // ============================================
+    // Internal Helper Functions
+    // ============================================
+
+    /**
+     * @notice Get token decimals using IERC20Metadata interface
+     * @param token Address of the ERC20 token
+     * @return decimals Number of decimals for the token
+     * @dev Queries the token contract for its decimal places
+     * @dev Used in TVL calculation to normalize amounts
+     */
+    function _getDecimals(address token) internal view returns (uint8 decimals) {
+        return IERC20Metadata(token).decimals();
+    }
+
+    /**
+     * @notice Add token to _assets array if not already present
+     * @param token Address of the token to add
+     * @dev Checks if token exists in array before adding (prevents duplicates)
+     * @dev Used by registerAssets() when accepting new tokens
+     * @dev Part of Mapping + Array pattern (Decision 13)
+     */
+    function _addToAssets(address token) internal {
+        // Check if token already exists in _assets array
+        for (uint256 i = 0; i < _assets.length; i++) {
+            if (_assets[i] == token) {
+                return; // Token already in array, no need to add
+            }
+        }
+        // Token not found, add it to the array
+        _assets.push(token);
+    }
+
+    /**
+     * @notice Add recipient to _profitsRecipients array
+     * @param recipient Address of the profit recipient to add
+     * @dev Only adds if not already present (prevents duplicates)
+     * @dev Called by setProfitsDistribution() when percentage > 0
+     * @dev Part of Mapping + Array pattern (Decision 13)
+     */
+    function _addToProfitsRecipients(address recipient) internal {
+        // Check if recipient already exists in array
+        for (uint256 i = 0; i < _profitsRecipients.length; i++) {
+            if (_profitsRecipients[i] == recipient) {
+                return; // Recipient already in array
+            }
+        }
+        // Recipient not found, add to array
+        _profitsRecipients.push(recipient);
+    }
+
+    /**
+     * @notice Remove recipient from _profitsRecipients array using swap-and-pop pattern
+     * @param recipient Address of the profit recipient to remove
+     * @dev Uses swap-and-pop for O(1) removal: swaps with last element then pops
+     * @dev Called by setProfitsDistribution() when percentage = 0
+     * @dev Part of Mapping + Array pattern (Decision 13)
+     */
+    function _removeFromProfitsRecipients(address recipient) internal {
+        uint256 length = _profitsRecipients.length;
+
+        // Find the recipient in the array
+        for (uint256 i = 0; i < length; i++) {
+            if (_profitsRecipients[i] == recipient) {
+                // Swap with last element
+                _profitsRecipients[i] = _profitsRecipients[length - 1];
+                // Remove last element
+                _profitsRecipients.pop();
+                return;
+            }
+        }
+        // If recipient not found, do nothing (idempotent operation)
+    }
+
+    // ============================================
+    // Access Control Internal Functions
+    // ============================================
+
+    /**
+     * @notice Check that caller is King's core vault
+     * @dev Reverts with OnlyKingVault if caller is not kingVault
+     */
+    function _requireKingVault() internal view {
+        if (msg.sender != kingVault) revert IKingVault.OnlyKingVault();
+    }
+
+    /**
+     * @notice Check that caller is governor
+     * @dev Reverts with OnlyGovernor if caller is not governor
+     */
+    function _requireGovernor() internal view {
+        if (msg.sender != governor) revert IKingVault.OnlyGovernor();
+    }
+
+    /**
+     * @notice Check that caller is governor or King's core vault
+     * @dev Reverts with OnlyGovernorOrKingVault if caller is neither
+     */
+    function _requireGovernorOrKingVault() internal view {
+        if (msg.sender != governor && msg.sender != kingVault) {
+            revert IKingVault.OnlyGovernorOrKingVault();
+        }
+    }
+
+
+    // ============================================
+    // UUPS Upgrade Authorization
+    // ============================================
+
+    /**
+     * @notice Authorize upgrade to new implementation
+     * @dev Only governor can authorize upgrades
+     * @dev Required by UUPSUpgradeable pattern
+     * @param newImplementation Address of new implementation contract
+     */
+    function _authorizeUpgrade(address newImplementation) internal view override {
+        _requireGovernor();
+        // Additional validation could be added here (e.g., implementation contract checks)
+    }
 
     // ============================================
     // Constructor
