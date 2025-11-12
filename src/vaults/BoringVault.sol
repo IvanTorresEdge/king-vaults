@@ -7,9 +7,11 @@ import {ITellerWithMultiAssetSupport} from "../interfaces/external/ITellerWithMu
 import {IAccountantWithRateProviders} from "../interfaces/external/IAccountantWithRateProviders.sol";
 import {IAtomicQueue} from "../interfaces/external/IAtomicQueue.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {IPriceProvider} from "../interfaces/IPriceProvider.sol";
 
 /**
  * @title BoringVault
@@ -855,6 +857,415 @@ contract BoringVault is KingVault {
 
         // Ensure result fits in uint88 (AtomicRequest struct limitation)
         require(atomicPrice <= type(uint88).max, "Atomic price overflow");
+    }
+
+    // ============================================
+    // Profit Calculation
+    // ============================================
+
+    /**
+     * @notice Calculate current profit (share value - principal deposits)
+     * @dev Profit = Current BoringVault share value - Total principal deposits (in ETH)
+     * @dev Returns 0 if at a loss (no negative profit)
+     * @dev Used by harvestProfits() to determine withdrawal amount
+     *
+     * @return profit Current profit in ETH terms (18 decimals)
+     *
+     * @custom:formula profit = max(0, shareValue - principalSum)
+     * @custom:example
+     * Scenario: 1000 ETHFI deposited → 500 shares @ 2.0 rate
+     *   Later: shares worth 1200 ETHFI @ 2.4 rate
+     *   Principal: 1000 ETHFI (in ETH via price provider)
+     *   Share Value: 1200 ETH (_calculateVaultShareValue)
+     *   Profit: 1200 - 1000 = 200 ETH
+     *
+     * Algorithm:
+     * 1. Calculate current share value in ETH
+     * 2. Sum all principal deposits across registered assets
+     * 3. Convert each asset principal to ETH using price provider
+     * 4. Return max(0, shareValue - principalSum)
+     */
+    function calculateProfit() public view returns (uint256 profit) {
+        // Get current BoringVault share value in ETH
+        uint256 currentValue = _calculateVaultShareValue();
+
+        // Calculate total principal across all registered assets
+        uint256 totalPrincipal = 0;
+        IPriceProvider provider = IPriceProvider(priceProvider);
+
+        for (uint256 i = 0; i < _assets.length; i++) {
+            address asset = _assets[i];
+
+            // Skip unregistered assets
+            if (!_registeredTokens[asset]) continue;
+
+            // Get principal deposits (from parent KingVault)
+            uint256 deposited = _deposits[asset];
+
+            if (deposited == 0) continue;
+
+            // Get asset price in ETH
+            uint256 priceInEth = provider.getPriceInEth(asset);
+            require(priceInEth > 0, "Invalid price");
+
+            // Get asset decimals
+            uint8 decimals = IERC20Metadata(asset).decimals();
+
+            // Convert deposited amount to ETH
+            // principalInEth = deposited × priceInEth / (10^decimals)
+            uint256 principalInEth = Math.mulDiv(deposited, priceInEth, 10 ** decimals);
+
+            totalPrincipal += principalInEth;
+        }
+
+        // Calculate profit (or 0 if at a loss)
+        if (currentValue > totalPrincipal) {
+            profit = currentValue - totalPrincipal;
+        } else {
+            profit = 0; // No profit or at a loss
+        }
+
+        return profit;
+    }
+
+    /**
+     * @notice Harvest profits by queuing withdrawal of profit shares (Type B)
+     * @dev Owner-only function to initiate profit distribution cycle
+     * @dev Queues withdrawal for profit shares only (NOT principal)
+     * @dev DUAL TRACKING: Increments _queuedProfits[baseAsset] to protect from principal contamination
+     * @dev Does NOT modify _deposits (profit ≠ principal)
+     *
+     * @custom:validation Profit must be > 0
+     * @custom:validation Share value must be > 0
+     * @custom:validation Profit shares must be > 0
+     * @custom:validation No concurrent withdrawals for base asset
+     *
+     * Workflow:
+     * 1. Calculate current profit (shareValue - principal)
+     * 2. Calculate profit shares from current share balance
+     * 3. Get base asset from Accountant
+     * 4. Queue withdrawal for profit shares via internal helper
+     * 5. Increment _queuedProfits[baseAsset] (Type B tracking)
+     * 6. Emit events
+     *
+     * After solver fulfills:
+     * - Call distributeProfits() to send assets to recipients
+     * - distributeProfits() clears _queuedProfits tracking
+     *
+     * Example:
+     * ```solidity
+     * // Vault has 500 shares worth 1200 ETH, principal = 1000 ETH
+     * // Profit = 200 ETH = 16.67% of shareValue
+     * // Profit shares = 500 × 0.1667 = 83.33 shares
+     * boringVault.harvestProfits();
+     * // Queues 83.33 share withdrawal for ~200 WETH
+     * // _queuedProfits[WETH] = 200e18
+     * // _deposits[WETH] UNCHANGED (profit ≠ principal)
+     * ```
+     */
+    function harvestProfits() external override onlyOwner whenNotPaused {
+        // 1. Calculate current profit
+        uint256 profitInEth = calculateProfit();
+        require(profitInEth > 0, "No profit to harvest");
+
+        // 2. Get current share value
+        uint256 shareValue = _calculateVaultShareValue();
+        require(shareValue > 0, "No share value");
+
+        // 3. Get current share balance
+        uint256 currentShares = IERC20(vault).balanceOf(address(this));
+        require(currentShares > 0, "No shares");
+
+        // 4. Calculate profit shares
+        // profitShares = currentShares × profitInEth / shareValue
+        uint256 profitShares = Math.mulDiv(currentShares, profitInEth, shareValue);
+
+        // 5. Validate profit shares
+        require(profitShares > 0, "No profit shares");
+        require(profitShares <= currentShares, "Invalid profit calculation");
+
+        // 6. Get base asset from Accountant
+        address baseAsset = IAccountantWithRateProviders(accountant).base();
+        require(baseAsset != address(0), "Invalid base asset");
+
+        // 7. Check no pending withdrawal for base asset
+        if (_withdrawalRequests[baseAsset].deadline > 0) {
+            revert WithdrawalNotQueued();
+        }
+
+        // 8. Calculate expected asset amount from profit shares
+        uint256 expectedAmount = _calculateExpectedAssets(baseAsset, profitShares);
+
+        // 9. DUAL TRACKING: Increment queued profits (Type B tracking)
+        _queuedProfits[baseAsset] += expectedAmount;
+
+        // 10. Queue withdrawal for profit shares (Type B)
+        // Uses internal helper to avoid modifying _queuedWithdraw
+        _queueProfitWithdrawal(baseAsset, profitShares, 0); // 0 = use default deadline
+
+        // 11. Emit events
+        emit ProfitsHarvested(block.timestamp); // Inherited from IKingVault
+        emit ProfitSharesQueued(profitShares, profitInEth);
+    }
+
+    /**
+     * @notice Internal helper to queue profit withdrawal (Type B)
+     * @dev Similar to withdrawFromVault() but for Type B (profit) withdrawals
+     * @dev Does NOT modify _deposits (profit ≠ principal)
+     * @dev Does NOT modify _queuedWithdraw (only Type A uses this)
+     * @dev Called by harvestProfits() after setting _queuedProfits
+     *
+     * @param _asset ERC-20 token address we want to receive
+     * @param _shareAmount BoringVault shares to withdraw
+     * @param _deadline Unix timestamp for request expiration (0 = use default)
+     *
+     * @custom:security No access control needed (internal function)
+     * @custom:security Assumes validation done by caller (harvestProfits)
+     */
+    function _queueProfitWithdrawal(
+        address _asset,
+        uint256 _shareAmount,
+        uint64 _deadline
+    ) internal {
+        // Calculate deadline (use default if not provided)
+        uint64 deadline = _deadline == 0 ? uint64(block.timestamp) + withdrawalDuration : _deadline;
+
+        // Calculate expected asset amount from shares
+        uint256 expectedAmount = _calculateExpectedAssets(_asset, _shareAmount);
+
+        // Calculate atomic price with slippage protection
+        uint256 atomicPrice = _calculateAtomicPrice(_asset, _shareAmount, expectedAmount);
+
+        // Create AtomicRequest struct
+        IAtomicQueue.AtomicRequest memory request = IAtomicQueue.AtomicRequest({
+            deadline: deadline,
+            atomicPrice: uint88(atomicPrice),
+            offerAmount: uint96(_shareAmount),
+            inSolve: false
+        });
+
+        // Approve AtomicQueue to spend shares
+        IERC20(vault).approve(atomicQueue, _shareAmount);
+
+        // Queue withdrawal in AtomicQueue
+        IAtomicQueue(atomicQueue).updateAtomicRequest(
+            ERC20(vault), // offer: BoringVault shares
+            ERC20(_asset), // want: Asset we expect to receive
+            request
+        );
+
+        // Store withdrawal request details
+        _withdrawalRequests[_asset] = WithdrawalRequest({
+            asset: _asset,
+            offer: expectedAmount, // IN-TRANSIT ASSET TRACKING
+            want: _shareAmount,
+            deadline: deadline
+        });
+
+        // Update pending shares
+        _pendingShares += _shareAmount;
+
+        // NOTE: Does NOT modify _queuedWithdraw (only Type A uses this)
+        // NOTE: Does NOT modify _deposits (profit ≠ principal)
+        // NOTE: _queuedProfits already incremented by harvestProfits()
+
+        emit WithdrawalQueued(_asset, _shareAmount, expectedAmount, deadline);
+    }
+
+    /**
+     * @notice Distribute idle profits to recipients and clear queued profit tracking
+     * @dev Overrides parent KingVault.distributeProfits() to add _queuedProfits cleanup
+     * @dev Only callable by owner (governance multi-sig)
+     * @dev DUAL TRACKING: Clears _queuedProfits[asset] for all assets after distribution
+     *
+     * @custom:validation Executes parent distribution logic
+     * @custom:validation Clears Type B tracking after successful distribution
+     *
+     * Workflow:
+     * 1. Execute distribution logic (inherited from parent):
+     *    a. Calculate idle profit (balance - deposits)
+     *    b. Distribute to configured recipients
+     *    c. Emit ProfitsDistributed event
+     * 2. Clear _queuedProfits for all assets (Type B cleanup)
+     *
+     * Example:
+     * ```solidity
+     * // After solver fulfills profit harvest:
+     * // - 200 WETH arrived as idle balance
+     * // - _queuedProfits[WETH] = 200e18 (still tracked)
+     *
+     * boringVault.distributeProfits();
+     * // - Parent sends 200 WETH to recipients
+     * // - _queuedProfits[WETH] = 0 (cleared)
+     * // - Ready for next harvest cycle
+     * ```
+     */
+    function distributeProfits() external override onlyOwner whenNotPaused {
+        // Access control already verified by modifiers above
+
+        // Validate we have at least one recipient configured
+        if (_profitsRecipients.length == 0) {
+            revert InvalidAssetArray(); // No recipients configured
+        }
+
+        // Prepare event data structures
+        address[] memory distributedTokens = new address[](_assets.length);
+        uint256[] memory tokenTotalAmounts = new uint256[](_assets.length);
+        uint256 tokenCount = 0;
+
+        // 2D array for amounts per recipient per token
+        uint256[][] memory recipientAmounts = new uint256[][](_profitsRecipients.length);
+        for (uint256 i = 0; i < _profitsRecipients.length; i++) {
+            recipientAmounts[i] = new uint256[](_assets.length);
+        }
+
+        // Iterate through all assets
+        for (uint256 i = 0; i < _assets.length; i++) {
+            address token = _assets[i];
+
+            // Skip if token is not registered/accepted
+            if (!_registeredTokens[token]) {
+                continue;
+            }
+
+            // Get current balance and deposited principal
+            uint256 balance = IERC20(token).balanceOf(address(this));
+            uint256 principal = _deposits[token];
+
+            // Calculate profit (only distribute if balance > principal)
+            if (balance <= principal) {
+                continue; // No profit to distribute
+            }
+
+            uint256 profit = balance - principal;
+
+            // Track token for event
+            distributedTokens[tokenCount] = token;
+            tokenTotalAmounts[tokenCount] = profit;
+
+            // Distribute profit to each recipient
+            for (uint256 j = 0; j < _profitsRecipients.length; j++) {
+                address recipient = _profitsRecipients[j];
+                uint16 percentBPS = _profitsDistribution[recipient];
+
+                // Calculate recipient's share using mulDiv for precision
+                // share = (profit * percentBPS) / HUNDRED_PERCENT_IN_BPS
+                uint256 share = Math.mulDiv(profit, uint256(percentBPS), HUNDRED_PERCENT_IN_BPS);
+
+                // Transfer share to recipient (skip if share is 0)
+                if (share > 0) {
+                    SafeERC20.safeTransfer(IERC20(token), recipient, share);
+                    recipientAmounts[j][tokenCount] = share;
+                }
+            }
+
+            tokenCount++;
+        }
+
+        // Resize arrays to actual count (remove empty slots)
+        address[] memory finalTokens = new address[](tokenCount);
+        uint256[] memory finalTotalAmounts = new uint256[](tokenCount);
+        uint256[][] memory finalRecipientAmounts = new uint256[][](_profitsRecipients.length);
+
+        for (uint256 i = 0; i < tokenCount; i++) {
+            finalTokens[i] = distributedTokens[i];
+            finalTotalAmounts[i] = tokenTotalAmounts[i];
+        }
+
+        for (uint256 i = 0; i < _profitsRecipients.length; i++) {
+            finalRecipientAmounts[i] = new uint256[](tokenCount);
+            for (uint256 j = 0; j < tokenCount; j++) {
+                finalRecipientAmounts[i][j] = recipientAmounts[i][j];
+            }
+        }
+
+        // Emit event with distribution details
+        emit ProfitsDistributed(_profitsRecipients, finalTokens, finalRecipientAmounts, block.timestamp);
+
+        // DUAL TRACKING: Clear queued profits for all assets (Type B cleanup)
+        // After distribution completes, profit assets are no longer reserved
+        for (uint256 i = 0; i < _assets.length; i++) {
+            address asset = _assets[i];
+            if (_queuedProfits[asset] > 0) {
+                _queuedProfits[asset] = 0;
+            }
+        }
+    }
+
+    /**
+     * @notice Cancel pending profit harvest request (Type B)
+     * @dev Owner-only function to cancel unfulfilled profit withdrawal
+     * @dev DUAL TRACKING: Decrements _queuedProfits[_asset] to clear Type B tracking
+     * @dev Does NOT modify _deposits (profit was never counted as principal)
+     *
+     * @param _asset ERC-20 token address of profit harvest to cancel
+     *
+     * @custom:validation Queued profits must exist for asset
+     * @custom:validation Withdrawal request must exist
+     *
+     * Workflow:
+     * 1. Validate _queuedProfits[_asset] > 0
+     * 2. Get queued amount
+     * 3. Cancel AtomicQueue request (set to empty)
+     * 4. Decrement _queuedProfits[_asset] (clear Type B tracking)
+     * 5. Delete _withdrawalRequests[_asset]
+     * 6. Reset _pendingShares
+     * 7. Emit event
+     *
+     * CRITICAL: Does NOT restore _deposits (profit was never principal)
+     *
+     * Example:
+     * ```solidity
+     * // Profit harvest queued: 83 shares for 200 WETH
+     * // _queuedProfits[WETH] = 200e18
+     * // _deposits[WETH] = 1000e18 (unchanged)
+     *
+     * // Solver never fulfills, governance cancels:
+     * boringVault.cancelProfitsHarvest(WETH);
+     *
+     * // - _queuedProfits[WETH] = 0 (cleared)
+     * // - _deposits[WETH] = 1000e18 (still unchanged)
+     * // - 83 shares restored to available pool
+     * ```
+     */
+    function cancelProfitsHarvest(address _asset) external onlyOwner whenNotPaused {
+        // 1. Validate queued profits exist
+        uint256 queuedAmount = _queuedProfits[_asset];
+        if (queuedAmount == 0) {
+            revert NoProfitsQueued();
+        }
+
+        // 2. Validate withdrawal request exists
+        WithdrawalRequest memory request = _withdrawalRequests[_asset];
+        if (request.deadline == 0) {
+            revert NoWithdrawalQueued();
+        }
+
+        // 3. Create empty AtomicRequest to cancel
+        IAtomicQueue.AtomicRequest memory emptyRequest =
+            IAtomicQueue.AtomicRequest({deadline: 0, atomicPrice: 0, offerAmount: 0, inSolve: false});
+
+        // 4. Cancel withdrawal in AtomicQueue
+        IAtomicQueue(atomicQueue).updateAtomicRequest(
+            ERC20(vault), // offer: BoringVault shares
+            ERC20(_asset), // want: Asset
+            emptyRequest
+        );
+
+        // 5. DUAL TRACKING: Decrement queued profits (clear Type B tracking)
+        _queuedProfits[_asset] -= queuedAmount;
+
+        // 6. Delete withdrawal request
+        delete _withdrawalRequests[_asset];
+
+        // 7. Reset pending shares
+        _pendingShares = 0;
+
+        // CRITICAL: Does NOT modify _deposits (profit was never principal)
+        // Shares automatically restored (no internal tracking, use balanceOf())
+
+        // 8. Emit event
+        emit ProfitsHarvestCancelled(_asset, queuedAmount, block.timestamp);
     }
 
     // ============================================
