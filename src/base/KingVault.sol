@@ -545,7 +545,7 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
      * @return usdValue Total value in USD (18 decimals)
      * @dev Aggregates value of all deposited tokens using _deposits mapping
      */
-    function tvl() external view override returns (uint256 ethValue, uint256 usdValue) {
+    function tvl() external view virtual override returns (uint256 ethValue, uint256 usdValue) {
         // Initialize total ETH value
         uint256 totalEth = 0;
 

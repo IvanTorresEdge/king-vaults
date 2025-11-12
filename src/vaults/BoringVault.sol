@@ -203,6 +203,13 @@ contract BoringVault is KingVault {
      */
     error SlippageExceeded(uint256 expected, uint256 received);
 
+    /**
+     * @notice Thrown when slippage exceeds maximum allowed limit
+     * @param requested The requested slippage in BPS
+     * @param maximum The maximum allowed slippage in BPS
+     */
+    error SlippageExceedsLimit(uint16 requested, uint16 maximum);
+
     // ============================================
     // Events
     // ============================================
@@ -1267,6 +1274,233 @@ contract BoringVault is KingVault {
         // 8. Emit event
         emit ProfitsHarvestCancelled(_asset, queuedAmount, block.timestamp);
     }
+
+    // ============================================
+    // Configuration Functions
+    // ============================================
+
+    /**
+     * @notice Update maximum slippage tolerance for deposits
+     * @dev Only callable by owner, affects future deposit operations
+     * @dev Validates slippage does not exceed MAX_SLIPPAGE_LIMIT (10%)
+     *
+     * @param _slippageBPS New slippage tolerance in basis points (1 BPS = 0.01%)
+     *
+     * @custom:validation _slippageBPS must be <= MAX_SLIPPAGE_LIMIT (1000 BPS)
+     * @custom:example setMaxSlippage(100) sets 1% slippage tolerance
+     *
+     * Emits: MaxSlippageUpdated
+     *
+     * Example Usage:
+     * ```solidity
+     * // Increase slippage tolerance to 1%
+     * boringVault.setMaxSlippage(100);
+     * ```
+     */
+    function setMaxSlippage(uint16 _slippageBPS) external onlyOwner whenNotPaused {
+        // Validate slippage within limit
+        if (_slippageBPS > MAX_SLIPPAGE_LIMIT) {
+            revert SlippageExceedsLimit(_slippageBPS, MAX_SLIPPAGE_LIMIT);
+        }
+
+        // Store old value for event
+        uint16 oldSlippage = maxSlippageBPS;
+
+        // Update slippage
+        maxSlippageBPS = _slippageBPS;
+
+        // Emit event
+        emit MaxSlippageUpdated(oldSlippage, _slippageBPS);
+    }
+
+    /**
+     * @notice Update AtomicQueue contract address for withdrawal operations
+     * @dev Only callable by owner when no withdrawals are pending
+     * @dev Validates address is not zero and no pending shares exist
+     *
+     * @param _atomicQueue New AtomicQueue contract address
+     *
+     * @custom:validation _atomicQueue must not be zero address
+     * @custom:validation _pendingShares must be zero (no active withdrawals)
+     * @custom:security Requires no pending withdrawals to prevent orphaned requests
+     *
+     * Emits: AtomicQueueUpdated
+     *
+     * Example Usage:
+     * ```solidity
+     * // Update to new AtomicQueue deployment
+     * address newQueue = 0x1234...5678;
+     * boringVault.setAtomicQueue(newQueue);
+     * ```
+     */
+    function setAtomicQueue(address _atomicQueue) external onlyOwner whenNotPaused {
+        // Validate new address
+        if (_atomicQueue == address(0)) {
+            revert ZeroAddress();
+        }
+
+        // Require no pending withdrawals
+        if (_pendingShares > 0) {
+            revert NoWithdrawalQueued(); // Indicates pending withdrawal blocks update
+        }
+
+        // Store old value for event
+        address oldQueue = atomicQueue;
+
+        // Update queue address
+        atomicQueue = _atomicQueue;
+
+        // Emit event
+        emit AtomicQueueUpdated(oldQueue, _atomicQueue);
+    }
+
+    /**
+     * @notice Update default withdrawal duration for new requests
+     * @dev Only callable by owner, affects future withdrawal deadline calculations
+     * @dev Does not affect existing pending withdrawals
+     *
+     * @param _duration New duration in seconds
+     *
+     * @custom:example setWithdrawalDuration(14 days) sets 2-week default
+     * @custom:note Existing pending withdrawals retain their original deadlines
+     *
+     * Emits: WithdrawalDurationUpdated
+     *
+     * Example Usage:
+     * ```solidity
+     * // Extend default duration to 14 days
+     * boringVault.setWithdrawalDuration(14 days);
+     *
+     * // Reduce to 3 days for faster settlements
+     * boringVault.setWithdrawalDuration(3 days);
+     * ```
+     */
+    function setWithdrawalDuration(uint64 _duration) external onlyOwner whenNotPaused {
+        // Store old value for event
+        uint64 oldDuration = withdrawalDuration;
+
+        // Update duration
+        withdrawalDuration = _duration;
+
+        // Emit event
+        emit WithdrawalDurationUpdated(oldDuration, _duration);
+    }
+
+    // ============================================
+    // View Functions
+    // ============================================
+
+    /**
+     * @notice Get pending shares committed to withdrawal
+     * @dev Returns amount of shares locked in active withdrawal request
+     * @return Pending share amount (0 if no active withdrawal)
+     *
+     * Example Usage:
+     * ```solidity
+     * uint256 pending = boringVault.getPendingShares();
+     * // Returns: 83e18 (83 shares queued for withdrawal)
+     * ```
+     */
+    function getPendingShares() external view returns (uint256) {
+        return _pendingShares;
+    }
+
+    /**
+     * @notice Get total BoringVault shares owned by this contract
+     * @dev Queries vault.balanceOf() directly
+     * @return Total share balance including pending withdrawals
+     *
+     * Example Usage:
+     * ```solidity
+     * uint256 totalShares = boringVault.getVaultShares();
+     * uint256 availableShares = totalShares - boringVault.getPendingShares();
+     * ```
+     */
+    function getVaultShares() external view returns (uint256) {
+        return IERC20(vault).balanceOf(address(this));
+    }
+
+    /**
+     * @notice Get withdrawal request details for specific asset
+     * @dev Returns struct with asset, offer, want, deadline
+     * @param _asset Asset address to query
+     * @return WithdrawalRequest struct (all fields zero if no request)
+     *
+     * Example Usage:
+     * ```solidity
+     * WithdrawalRequest memory request = boringVault.getWithdrawalRequest(WETH);
+     * if (request.deadline > 0) {
+     *     // Active withdrawal exists
+     *     console.log("Expecting", request.offer, "WETH");
+     *     console.log("Offering", request.want, "shares");
+     * }
+     * ```
+     */
+    function getWithdrawalRequest(address _asset) external view returns (WithdrawalRequest memory) {
+        return _withdrawalRequests[_asset];
+    }
+
+    /**
+     * @notice Check if Teller is paused
+     * @dev Queries Teller.isPaused() to determine if deposits are blocked
+     * @return true if Teller is paused, false otherwise
+     *
+     * Example Usage:
+     * ```solidity
+     * if (boringVault.isTellerPaused()) {
+     *     // Cannot deposit, wait for unpause
+     * }
+     * ```
+     */
+    function isTellerPaused() external view returns (bool) {
+        return ITellerWithMultiAssetSupport(teller).isPaused();
+    }
+
+    /**
+     * @notice Check if Accountant is paused
+     * @dev Queries Accountant.isPaused() to determine if rate queries are blocked
+     * @return true if Accountant is paused, false otherwise
+     *
+     * Example Usage:
+     * ```solidity
+     * if (boringVault.isAccountantPaused()) {
+     *     // Cannot get rates, TVL calculation blocked
+     * }
+     * ```
+     */
+    function isAccountantPaused() external view returns (bool) {
+        return IAccountantWithRateProviders(accountant).isPaused();
+    }
+
+    /**
+     * @notice Get current exchange rate from Accountant
+     * @dev Returns rate in base asset denomination (e.g., ETH per share)
+     * @dev Uses unsafe getRate() for view function (gas efficient)
+     * @return Exchange rate with 18 decimals
+     *
+     * Example Usage:
+     * ```solidity
+     * uint256 rate = boringVault.getVaultRate();
+     * // Returns: 1.2e18 (1 share = 1.2 ETH)
+     * ```
+     */
+    function getVaultRate() external view returns (uint256) {
+        return IAccountantWithRateProviders(accountant).getRate();
+    }
+
+    // NOTE: tvl() function is inherited from parent KingVault
+    // It correctly uses _deposits mapping for principal-only TVL tracking
+    // Share appreciation does NOT affect TVL - it's tracked as profit separately
+    //
+    // CRITICAL ACCOUNTING:
+    // - _deposits[asset] only changes when King main vault calls deposit()/withdraw()
+    // - Share value appreciation does NOT affect TVL
+    // - Profit = shareValue - principal (separate from TVL)
+    //
+    // Example: 1000 ETHFI deposited → 500 shares @ 2.0 rate
+    //   Later: shares worth 1200 ETHFI @ 2.4 rate
+    //   TVL remains 1000 ETHFI (principal only)
+    //   Profit = 1200 - 1000 = 200 ETHFI (NOT in TVL)
 
     // ============================================
     // UUPS Upgrade
