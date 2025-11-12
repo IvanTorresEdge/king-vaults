@@ -59,6 +59,11 @@ contract KingVaultHarness is KingVault {
             // Validate token address
             require(token != address(0), "Zero address");
 
+            // Safety check: Prevent disabling token if deposits exist
+            if (!accepted && _deposits[token] > 0) {
+                revert CannotDisableTokenWithDeposits(token, _deposits[token]);
+            }
+
             // Update registration status
             _registeredTokens[token] = accepted;
 
@@ -115,16 +120,6 @@ contract KingVaultHarness is KingVault {
     function registerTokens(address[] memory _tokens, bool[] memory _accepted) external {
         _requireOwner();
         _registerAssets(_tokens, _accepted);
-    }
-
-    /**
-     * @notice TVL stub implementation (returns zero for now)
-     * @dev Full implementation in Task 4.1
-     * @return ethValue Total value in ETH (18 decimals)
-     * @return usdValue Total value in USD (18 decimals)
-     */
-    function tvl() external pure override returns (uint256 ethValue, uint256 usdValue) {
-        return (0, 0);
     }
 
     /**

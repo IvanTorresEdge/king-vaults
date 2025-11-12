@@ -3,8 +3,11 @@ pragma solidity ^0.8.25;
 
 import {KingVaultStorage} from "./KingVaultStorage.sol";
 import {IKingVault} from "../interfaces/IKingVault.sol";
+import {IPriceProvider} from "../interfaces/IPriceProvider.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /**
  * @title KingVault
@@ -221,25 +224,161 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
     /**
      * @notice Internal function to register assets
      * @dev Validates tokens and updates storage mappings
-     * @dev Full implementation in Feature 5 (Task 5.2)
      * @param _tokens Array of token addresses to register
      * @param _accepted Array of acceptance status for tokens
      */
     function _registerAssets(address[] memory _tokens, bool[] memory _accepted) internal virtual {
-        // Stub for now - full implementation in Task 5.2
-        // Will include:
-        // - Validate arrays non-empty and matching length
-        // - Loop through tokens:
-        //   - Validate token != address(0)
-        //   - Get price from IPriceProvider and validate > 0
-        //   - Update _registeredTokens[token] = _accepted[i]
-        //   - Call _addToAssets(token) if _accepted[i] == true
-        //   - Emit TokenAdded or TokenRemoved events
+        // Validate arrays non-empty and matching length
+        if (_tokens.length == 0 || _tokens.length != _accepted.length) {
+            revert InvalidTokenArray();
+        }
+
+        // Loop through tokens and update registration
+        for (uint256 i = 0; i < _tokens.length; i++) {
+            address token = _tokens[i];
+            bool accepted = _accepted[i];
+
+            // Validate token address
+            if (token == address(0)) revert ZeroAddress();
+
+            // Validate token has price available (ensures it's a valid token)
+            if (!IPriceProvider(priceProvider).isPriceAvailable(token)) {
+                revert TokenNotAccepted(token);
+            }
+
+            // Track previous registration status
+            bool wasRegistered = _registeredTokens[token];
+
+            // Safety check: Prevent disabling token if deposits exist
+            if (!accepted && _deposits[token] > 0) {
+                revert CannotDisableTokenWithDeposits(token, _deposits[token]);
+            }
+
+            // Update registration status
+            _registeredTokens[token] = accepted;
+
+            // Add to assets array if accepted (only if not already present)
+            if (accepted) {
+                _addToAssets(token);
+                // Emit TokenAdded if newly accepted
+                if (!wasRegistered) {
+                    emit TokenAdded(token);
+                }
+            } else {
+                // Emit TokenRemoved if was previously registered
+                if (wasRegistered) {
+                    emit TokenRemoved(token);
+                }
+                // Note: Token stays in _assets array for audit trail
+            }
+        }
+    }
+
+    // ============================================
+    // Token Management
+    // ============================================
+
+    /**
+     * @notice Register or update asset tokens (ERC-20)
+     * @dev Only callable by owner (governance)
+     * @param _tokens Array of token addresses to register
+     * @param _accepted Array of acceptance status (true = accepted, false = not accepted)
+     */
+    function registerAssets(address[] memory _tokens, bool[] memory _accepted) external virtual override {
+        _requireOwner();
+        _registerAssets(_tokens, _accepted);
+    }
+
+    /**
+     * @notice Set the price provider for TVL calculations
+     * @dev Only callable by owner (governance)
+     * @param _newPriceProvider Address of the new price provider
+     */
+    function setPriceProvider(address _newPriceProvider) external {
+        _requireOwner();
+
+        // Validate address
+        if (_newPriceProvider == address(0)) revert ZeroAddress();
+
+        // Store old provider for event
+        address oldProvider = priceProvider;
+
+        // Update price provider
+        priceProvider = _newPriceProvider;
+
+        // Emit event
+        emit PriceProviderUpdated(oldProvider, _newPriceProvider);
     }
 
     // ============================================
     // View Functions
     // ============================================
+
+    /**
+     * @notice Calculate the total value locked in this vault
+     * @return ethValue Total value in ETH (18 decimals)
+     * @return usdValue Total value in USD (18 decimals)
+     * @dev Aggregates value of all deposited tokens using _deposits mapping
+     */
+    function tvl() external view override returns (uint256 ethValue, uint256 usdValue) {
+        // Initialize total ETH value
+        uint256 totalEth = 0;
+
+        // Get the price provider
+        IPriceProvider provider = IPriceProvider(priceProvider);
+
+        // Loop through all assets
+        for (uint256 i = 0; i < _assets.length; i++) {
+            address token = _assets[i];
+
+            // Skip if token is not registered/accepted
+            if (!_registeredTokens[token]) {
+                continue;
+            }
+
+            // Get deposited amount (principal tracking)
+            uint256 deposited = _deposits[token];
+
+            // Skip if no deposits
+            if (deposited == 0) {
+                continue;
+            }
+
+            // CRITICAL: Price must be available for ALL registered tokens with deposits
+            // We revert rather than skip to prevent understated TVL
+            if (!provider.isPriceAvailable(token)) {
+                revert PriceNotAvailable(token);
+            }
+
+            // Get price in ETH
+            uint256 priceInEth = provider.getPriceInEth(token);
+
+            // CRITICAL: Price must be non-zero for accurate TVL
+            // We revert rather than skip to prevent understated TVL
+            if (priceInEth == 0) {
+                revert PriceNotAvailable(token);
+            }
+
+            // Get token decimals
+            uint8 decimals = _getDecimals(token);
+
+            // Calculate token value in ETH using mulDiv for precision and overflow safety
+            // tokenEthValue = (deposited * priceInEth) / (10 ** decimals)
+            uint256 tokenEthValue = Math.mulDiv(deposited, priceInEth, 10 ** decimals);
+
+            // Add to total
+            totalEth += tokenEthValue;
+        }
+
+        // Convert ETH value to USD
+        (uint256 ethUsdPrice, uint256 ethUsdDecimals) = provider.getEthUsdPrice();
+
+        // Calculate USD value using mulDiv for precision and overflow safety
+        // usdValue = (totalEth * ethUsdPrice) / (10 ** ethUsdDecimals)
+        uint256 totalUsd = Math.mulDiv(totalEth, ethUsdPrice, 10 ** ethUsdDecimals);
+
+        return (totalEth, totalUsd);
+    }
 
     /**
      * @notice Get array of all registered and accepted assets

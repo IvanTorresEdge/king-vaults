@@ -154,6 +154,20 @@ interface IKingVault {
      */
     error InvalidPercentage();
 
+    /**
+     * @notice Thrown when attempting to disable a token that has active deposits
+     * @param token Address of the token with deposits
+     * @param depositAmount Amount of deposits that must be withdrawn first
+     */
+    error CannotDisableTokenWithDeposits(address token, uint256 depositAmount);
+
+    /**
+     * @notice Thrown when TVL calculation encounters a token without available price
+     * @param token Address of the token without price data
+     * @dev TVL calculation must revert rather than return partial/understated value
+     */
+    error PriceNotAvailable(address token);
+
     // ============================================
     // Core Functions
     // ============================================
