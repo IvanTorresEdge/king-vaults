@@ -64,7 +64,7 @@ contract KingVaultTVLTest is Test {
     // Happy Path Tests
     // ============================================
 
-    function test_TVL_EmptyVault() public {
+    function test_TVL_EmptyVault() public view {
         (uint256 ethValue, uint256 usdValue) = vault.tvl();
         assertEq(ethValue, 0);
         assertEq(usdValue, 0);

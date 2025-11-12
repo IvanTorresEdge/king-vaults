@@ -39,6 +39,7 @@ contract KingVaultHarness is KingVault {
      * @dev Just emits the event, no actual logic needed for deposit tests
      */
     function harvestProfits() external override {
+        _requireOwner();
         emit ProfitsHarvested(block.timestamp);
     }
 
