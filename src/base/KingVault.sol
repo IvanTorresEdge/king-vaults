@@ -218,6 +218,64 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
     }
 
     // ============================================
+    // Pause Management
+    // ============================================
+
+    /**
+     * @notice Pause vault operations
+     * @dev Callable by owner OR King's core vault
+     * @dev Blocks deposit() and withdraw() but allows emergencyWithdraw()
+     * @dev Uses OpenZeppelin PausableUpgradeable inherited from KingVaultStorage
+     */
+    function pause() external virtual override {
+        // Access control: owner or kingVault can call
+        _requireOwnerOrKingVault();
+
+        // Call OpenZeppelin's internal _pause()
+        _pause();
+
+        // Note: Paused(msg.sender) event is emitted by PausableUpgradeable
+    }
+
+    /**
+     * @notice Resume vault operations
+     * @dev Callable by owner OR King's core vault
+     * @dev Re-enables deposit() and withdraw() operations
+     */
+    function unpause() external virtual override {
+        // Access control: owner or kingVault can call
+        _requireOwnerOrKingVault();
+
+        // Call OpenZeppelin's internal _unpause()
+        _unpause();
+
+        // Note: Unpaused(msg.sender) event is emitted by PausableUpgradeable
+    }
+
+    // ============================================
+    // Profit Management (Abstract)
+    // ============================================
+
+    /**
+     * @notice Harvest profits from underlying protocols
+     * @dev Only callable by owner (governance)
+     * @dev Vault-specific implementation required (abstract)
+     * @dev Specialized vaults MUST override to implement protocol-specific profit harvesting
+     * @dev Does NOT distribute profits - call distributeProfits() separately
+     * @dev Example: BoringVault claims rewards from Veda protocol
+     */
+    function harvestProfits() external virtual override {
+        // Access control: only owner can harvest
+        _requireOwner();
+
+        // Emit harvest event
+        emit ProfitsHarvested(block.timestamp);
+
+        // Note: Specialized implementations MUST override this function
+        // to add protocol-specific harvesting logic before calling super.harvestProfits()
+    }
+
+    // ============================================
     // Internal Asset Registration
     // ============================================
 
