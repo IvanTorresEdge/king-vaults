@@ -276,6 +276,173 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
     }
 
     // ============================================
+    // Profit Distribution Management
+    // ============================================
+
+    /**
+     * @notice Set profit distribution percentages for recipients
+     * @dev Only callable by owner (governance)
+     * @dev Updates specified recipients. Total of ALL recipients must equal 100%.
+     * @dev Setting to 0 removes from distributions but keeps audit trail in mapping
+     * @dev Manages _profitsRecipients array: adds if new & >0, removes if exists & =0
+     * @param _recipients Array of recipient addresses to update
+     * @param _percentsBPS Array of percentages in basis points (10000 = 100%)
+     */
+    function setProfitsDistribution(
+        address[] memory _recipients,
+        uint16[] memory _percentsBPS
+    ) external virtual override {
+        // Access control: only owner can set distribution
+        _requireOwner();
+
+        // Validate arrays non-empty and matching length
+        if (_recipients.length == 0 || _recipients.length != _percentsBPS.length) {
+            revert InvalidTokenArray();
+        }
+
+        // Process each recipient update
+        for (uint256 i = 0; i < _recipients.length; i++) {
+            address recipient = _recipients[i];
+            uint16 percentBPS = _percentsBPS[i];
+
+            // Validate recipient address
+            if (recipient == address(0)) revert ZeroAddress();
+
+            // Validate percentage is within bounds
+            if (percentBPS > HUNDRED_PERCENT_IN_BPS) revert InvalidPercentage();
+
+            // Track previous distribution percentage
+            uint16 oldPercent = _profitsDistribution[recipient];
+
+            // Update distribution mapping
+            _profitsDistribution[recipient] = percentBPS;
+
+            // Manage _profitsRecipients array
+            if (percentBPS > 0) {
+                // Add to recipients array if new (percentage was 0 before)
+                if (oldPercent == 0) {
+                    _addToProfitsRecipients(recipient);
+                }
+            } else {
+                // Remove from recipients array if setting to 0
+                if (oldPercent > 0) {
+                    _removeFromProfitsRecipients(recipient);
+                }
+            }
+        }
+
+        // Validate total distribution equals 100% (10000 BPS)
+        uint256 totalDistribution = 0;
+        for (uint256 i = 0; i < _profitsRecipients.length; i++) {
+            totalDistribution += _profitsDistribution[_profitsRecipients[i]];
+        }
+
+        // Revert if total doesn't equal exactly 100%
+        if (totalDistribution != HUNDRED_PERCENT_IN_BPS) {
+            revert InvalidDistributionTotal(totalDistribution);
+        }
+
+        // Emit event after validation passes (privacy: no recipient details)
+        emit ProfitsDistributionUpdated(block.timestamp);
+    }
+
+    /**
+     * @notice Distribute profits to configured recipients
+     * @dev Only callable by owner (governance)
+     * @dev Distributes profit (balance - principal) for all assets
+     * @dev Same percentages apply to all tokens (not per-token distribution)
+     * @dev Iterates through _assets array for tokens, _profitsRecipients array for recipients
+     */
+    function distributeProfits() external virtual override {
+        // Access control: only owner can distribute
+        _requireOwner();
+
+        // Validate we have at least one recipient configured
+        if (_profitsRecipients.length == 0) {
+            revert InvalidTokenArray(); // No recipients configured
+        }
+
+        // Prepare event data structures
+        address[] memory distributedTokens = new address[](_assets.length);
+        uint256[] memory tokenTotalAmounts = new uint256[](_assets.length);
+        uint256 tokenCount = 0;
+
+        // 2D array for amounts per recipient per token
+        uint256[][] memory recipientAmounts = new uint256[][](_profitsRecipients.length);
+        for (uint256 i = 0; i < _profitsRecipients.length; i++) {
+            recipientAmounts[i] = new uint256[](_assets.length);
+        }
+
+        // Iterate through all assets
+        for (uint256 i = 0; i < _assets.length; i++) {
+            address token = _assets[i];
+
+            // Skip if token is not registered/accepted
+            if (!_registeredTokens[token]) {
+                continue;
+            }
+
+            // Get current balance and deposited principal
+            uint256 balance = IERC20(token).balanceOf(address(this));
+            uint256 principal = _deposits[token];
+
+            // Calculate profit (only distribute if balance > principal)
+            if (balance <= principal) {
+                continue; // No profit to distribute
+            }
+
+            uint256 profit = balance - principal;
+
+            // Track token for event
+            distributedTokens[tokenCount] = token;
+            tokenTotalAmounts[tokenCount] = profit;
+
+            // Distribute profit to each recipient
+            for (uint256 j = 0; j < _profitsRecipients.length; j++) {
+                address recipient = _profitsRecipients[j];
+                uint16 percentBPS = _profitsDistribution[recipient];
+
+                // Calculate recipient's share using mulDiv for precision
+                // share = (profit * percentBPS) / HUNDRED_PERCENT_IN_BPS
+                uint256 share = Math.mulDiv(profit, uint256(percentBPS), HUNDRED_PERCENT_IN_BPS);
+
+                // Transfer share to recipient (skip if share is 0)
+                if (share > 0) {
+                    SafeERC20.safeTransfer(IERC20(token), recipient, share);
+                    recipientAmounts[j][tokenCount] = share;
+                }
+            }
+
+            tokenCount++;
+        }
+
+        // Resize arrays to actual count (remove empty slots)
+        address[] memory finalTokens = new address[](tokenCount);
+        uint256[] memory finalTotalAmounts = new uint256[](tokenCount);
+        uint256[][] memory finalRecipientAmounts = new uint256[][](_profitsRecipients.length);
+
+        for (uint256 i = 0; i < tokenCount; i++) {
+            finalTokens[i] = distributedTokens[i];
+            finalTotalAmounts[i] = tokenTotalAmounts[i];
+        }
+
+        for (uint256 i = 0; i < _profitsRecipients.length; i++) {
+            finalRecipientAmounts[i] = new uint256[](tokenCount);
+            for (uint256 j = 0; j < tokenCount; j++) {
+                finalRecipientAmounts[i][j] = recipientAmounts[i][j];
+            }
+        }
+
+        // Emit event with all distribution details
+        emit ProfitsDistributed(
+            _profitsRecipients,
+            finalTokens,
+            finalRecipientAmounts,
+            block.timestamp
+        );
+    }
+
+    // ============================================
     // Internal Asset Registration
     // ============================================
 

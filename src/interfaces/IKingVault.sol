@@ -58,15 +58,10 @@ interface IKingVault {
 
     /**
      * @notice Emitted when profit distribution percentages are updated
-     * @param recipient Address of the recipient
-     * @param percentBPS Percentage in basis points (10000 = 100%)
+     * @dev Does not reveal recipients or percentages for privacy
      * @param timestamp Block timestamp of update
      */
-    event ProfitsDistributionUpdated(
-        address indexed recipient,
-        uint16 percentBPS,
-        uint256 timestamp
-    );
+    event ProfitsDistributionUpdated(uint256 timestamp);
 
     // NOTE: Paused and Unpaused events are not declared here because they are already
     // defined in PausableUpgradeable from OpenZeppelin
@@ -231,6 +226,25 @@ interface IKingVault {
      * @param _accepted Array of acceptance status (true = accepted, false = not accepted)
      */
     function registerAssets(address[] memory _tokens, bool[] memory _accepted) external;
+
+    /**
+     * @notice Set profit distribution percentages for recipients
+     * @dev Only callable by owner (governance)
+     * @dev Total of ALL recipients must equal 100% (10000 BPS)
+     * @param _recipients Array of recipient addresses to update
+     * @param _percentsBPS Array of percentages in basis points (10000 = 100%)
+     */
+    function setProfitsDistribution(
+        address[] memory _recipients,
+        uint16[] memory _percentsBPS
+    ) external;
+
+    /**
+     * @notice Distribute profits to configured recipients
+     * @dev Only callable by owner (governance)
+     * @dev Distributes profit (balance - principal) for all assets
+     */
+    function distributeProfits() external;
 
     // ============================================
     // View Functions
