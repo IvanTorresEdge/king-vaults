@@ -4,9 +4,9 @@ pragma solidity ^0.8.25;
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import {Ownable2StepUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {IKingVault} from "../interfaces/IKingVault.sol";
-import {Governable} from "../governance/Governable.sol";
 
 /**
  * @title KingVaultStorage
@@ -16,7 +16,7 @@ import {Governable} from "../governance/Governable.sol";
  */
 abstract contract KingVaultStorage is
     Initializable,
-    Governable,
+    Ownable2StepUpgradeable,
     PausableUpgradeable,
     UUPSUpgradeable
 {
@@ -62,8 +62,9 @@ abstract contract KingVaultStorage is
      * @notice Mapping of recipient address => profit distribution percentage in BPS
      * @dev Setting to 0 removes from distributions but keeps audit trail in mapping
      * @dev Total of all percentages MUST equal 10000 BPS (100%)
+     * @dev uint16 is sufficient (max 65535 > 10000 BPS) and enables storage packing
      */
-    mapping(address => uint256) internal _profitsDistribution;
+    mapping(address => uint16) internal _profitsDistribution;
 
     /**
      * @notice Array of profit recipients for iteration during distribution
@@ -159,50 +160,64 @@ abstract contract KingVaultStorage is
         // If recipient not found, do nothing (idempotent operation)
     }
 
-    // ============================================
-    // Access Control Internal Functions
-    // ============================================
-
     /**
-     * @notice Check that caller is King's core vault
-     * @dev Reverts with OnlyKingVault if caller is not kingVault
+     * @notice Require caller to be King's core vault
+     * @dev Reverts with OnlyKingVault error if caller is not kingVault
      */
     function _requireKingVault() internal view {
-        if (msg.sender != kingVault) revert IKingVault.OnlyKingVault();
-    }
-
-    /**
-     * @notice Check that caller is governor
-     * @dev Reverts with OnlyGovernor if caller is not governor
-     */
-    function _requireGovernor() internal view {
-        if (msg.sender != governor) revert IKingVault.OnlyGovernor();
-    }
-
-    /**
-     * @notice Check that caller is governor or King's core vault
-     * @dev Reverts with OnlyGovernorOrKingVault if caller is neither
-     */
-    function _requireGovernorOrKingVault() internal view {
-        if (msg.sender != governor && msg.sender != kingVault) {
-            revert IKingVault.OnlyGovernorOrKingVault();
+        if (msg.sender != kingVault) {
+            revert IKingVault.OnlyKingVault();
         }
     }
 
+    /**
+     * @notice Require caller to be owner
+     * @dev Reverts with OwnableUnauthorizedAccount error if caller is not owner
+     */
+    function _requireOwner() internal view {
+        _checkOwner();
+    }
+
+    /**
+     * @notice Require caller to be owner or King's core vault
+     * @dev Reverts with OnlyOwnerOrKingVault error if caller is neither
+     */
+    function _requireOwnerOrKingVault() internal view {
+        if (msg.sender != owner() && msg.sender != kingVault) {
+            revert IKingVault.OnlyOwnerOrKingVault();
+        }
+    }
+
+    // ============================================
+    // View Functions
+    // ============================================
+
+    /**
+     * @notice Get profit recipient information for a specific address
+     * @param recipient Address to query
+     * @return isRecipient True if address is an active profit recipient
+     * @return percentage Distribution percentage in BPS (0 if not a recipient)
+     * @dev Does not expose the full recipients array for privacy
+     * @dev Returns (true, percentage) if percentage > 0, otherwise (false, 0)
+     */
+    function getProfitRecipientInfo(address recipient) public view returns (bool isRecipient, uint16 percentage) {
+        percentage = _profitsDistribution[recipient];
+        isRecipient = percentage > 0;
+    }
 
     // ============================================
     // UUPS Upgrade Authorization
     // ============================================
 
     /**
-     * @notice Authorize upgrade to new implementation
-     * @dev Only governor can authorize upgrades
-     * @dev Required by UUPSUpgradeable pattern
-     * @param newImplementation Address of new implementation contract
+     * @notice Authorize contract upgrade
+     * @dev Only owner can authorize upgrades
+     * @dev Required by UUPSUpgradeable
+     * @param newImplementation Address of the new implementation
      */
     function _authorizeUpgrade(address newImplementation) internal view override {
-        _requireGovernor();
-        // Additional validation could be added here (e.g., implementation contract checks)
+        newImplementation; // Silence unused parameter warning
+        _checkOwner();
     }
 
     // ============================================

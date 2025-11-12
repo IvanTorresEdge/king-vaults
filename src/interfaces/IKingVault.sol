@@ -64,7 +64,7 @@ interface IKingVault {
      */
     event ProfitsDistributionUpdated(
         address indexed recipient,
-        uint256 percentBPS,
+        uint16 percentBPS,
         uint256 timestamp
     );
 
@@ -109,14 +109,9 @@ interface IKingVault {
     error OnlyKingVault();
 
     /**
-     * @notice Thrown when caller is not the governor
+     * @notice Thrown when caller is not the owner or King's core vault
      */
-    error OnlyGovernor();
-
-    /**
-     * @notice Thrown when caller is not the governor or King's core vault
-     */
-    error OnlyGovernorOrKingVault();
+    error OnlyOwnerOrKingVault();
 
     /**
      * @notice Thrown when operation requires contract to be paused but it's not
@@ -197,27 +192,27 @@ interface IKingVault {
 
     /**
      * @notice Emergency withdrawal of all idle assets
-     * @dev Callable by governor OR King's core vault
+     * @dev Callable by owner OR King's core vault
      * @dev Works even when paused
      */
     function emergencyWithdraw() external;
 
     /**
      * @notice Pause vault operations
-     * @dev Callable by governor OR King's core vault
+     * @dev Callable by owner OR King's core vault
      * @dev Blocks deposit() and withdraw() but allows emergencyWithdraw()
      */
     function pause() external;
 
     /**
      * @notice Resume vault operations
-     * @dev Callable by governor OR King's core vault
+     * @dev Callable by owner OR King's core vault
      */
     function unpause() external;
 
     /**
      * @notice Harvest profits from underlying protocols
-     * @dev Only callable by governor
+     * @dev Only callable by owner
      * @dev Vault-specific implementation (e.g., claim from BoringVault)
      * @dev Does NOT distribute - call distributeProfits() separately
      * @dev Abstract function - must be implemented by specialized vaults
@@ -226,7 +221,7 @@ interface IKingVault {
 
     /**
      * @notice Registers asset tokens (ERC-20)
-     * @dev Only callable by governor
+     * @dev Only callable by owner
      * @param _tokens Array of token addresses to register
      * @param _accepted Array of acceptance status (true = accepted, false = not accepted)
      */
@@ -256,10 +251,10 @@ interface IKingVault {
     function kingVault() external view returns (address);
 
     /**
-     * @notice Get the governor address
-     * @return Address of the governor
+     * @notice Get the owner address
+     * @return Address of the owner
      */
-    function governor() external view returns (address);
+    function owner() external view returns (address);
 
     /**
      * @notice Get the paused status
