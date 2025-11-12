@@ -68,17 +68,8 @@ interface IKingVault {
         uint256 timestamp
     );
 
-    /**
-     * @notice Emitted when vault is paused
-     * @param account Address that triggered the pause
-     */
-    event Paused(address account);
-
-    /**
-     * @notice Emitted when vault is unpaused
-     * @param account Address that triggered the unpause
-     */
-    event Unpaused(address account);
+    // NOTE: Paused and Unpaused events are not declared here because they are already
+    // defined in PausableUpgradeable from OpenZeppelin
 
     /**
      * @notice Emitted when a token is added to accepted tokens
@@ -244,27 +235,10 @@ interface IKingVault {
      */
     function assets() external view returns (address[] memory);
 
-    /**
-     * @notice Get the King's core vault address
-     * @return Address of King's core vault
-     */
-    function kingVault() external view returns (address);
-
-    /**
-     * @notice Get the owner address
-     * @return Address of the owner
-     */
-    function owner() external view returns (address);
-
-    /**
-     * @notice Get the paused status
-     * @return True if vault is paused, false otherwise
-     */
-    function paused() external view returns (bool);
-
-    /**
-     * @notice Get the price provider address
-     * @return Address of the price provider
-     */
-    function priceProvider() external view returns (address);
+    // NOTE: The following view functions are not declared here because they are already
+    // provided by parent contracts or public state variables:
+    // - kingVault() - public state variable in KingVaultStorage
+    // - priceProvider() - public state variable in KingVaultStorage
+    // - owner() - provided by Ownable2StepUpgradeable
+    // - paused() - provided by PausableUpgradeable
 }
