@@ -103,6 +103,118 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
     }
 
     // ============================================
+    // Withdrawal Management
+    // ============================================
+
+    /**
+     * @notice Withdraw idle tokens from this vault to receiver
+     * @dev Only callable by King's core vault (kingVault address)
+     * @dev Validates arrays, amounts, and balance before transferring
+     * @param _tokens Array of token addresses to withdraw
+     * @param _amounts Array of amounts to withdraw (must match tokens length)
+     * @param _receiver Address to receive the withdrawn tokens
+     */
+    function withdraw(
+        address[] memory _tokens,
+        uint256[] memory _amounts,
+        address _receiver
+    ) external override {
+        // Access control: only kingVault can call
+        _requireKingVault();
+
+        // Pause check: cannot withdraw when paused
+        _requireNotPaused();
+
+        // Validate receiver address
+        if (_receiver == address(0)) revert ZeroAddress();
+
+        // Validate arrays non-empty and matching length
+        if (_tokens.length == 0 || _tokens.length != _amounts.length) {
+            revert InvalidTokenArray();
+        }
+
+        // Process each token withdrawal
+        for (uint256 i = 0; i < _tokens.length; i++) {
+            address token = _tokens[i];
+            uint256 amount = _amounts[i];
+
+            // Validate amount > 0
+            if (amount == 0) revert ZeroAmount();
+
+            // Check sufficient balance
+            uint256 balance = IERC20(token).balanceOf(address(this));
+            if (balance < amount) {
+                revert InsufficientBalance(token, amount, balance);
+            }
+
+            // Transfer tokens from this contract to receiver
+            SafeERC20.safeTransfer(IERC20(token), _receiver, amount);
+
+            // Update deposits mapping (decrement principal tracking)
+            _deposits[token] -= amount;
+        }
+
+        // Emit event with all tokens, amounts, and receiver
+        emit Withdrawn(_tokens, _amounts, _receiver, block.timestamp);
+    }
+
+    /**
+     * @notice Emergency withdrawal of all idle assets
+     * @dev Callable by owner OR King's core vault
+     * @dev Works even when paused (no pause check)
+     * @dev Transfers all idle balances back to kingVault and resets deposits
+     */
+    function emergencyWithdraw() external override {
+        // Access control: owner or kingVault can call
+        _requireOwnerOrKingVault();
+
+        // No pause check - works even when paused
+
+        // Prepare arrays for event
+        address[] memory tokens = new address[](_assets.length);
+        uint256[] memory amounts = new uint256[](_assets.length);
+        uint256 count = 0;
+
+        // Loop through all registered tokens
+        for (uint256 i = 0; i < _assets.length; i++) {
+            address token = _assets[i];
+
+            // Skip if token is not registered/accepted
+            if (!_registeredTokens[token]) {
+                continue;
+            }
+
+            // Get current balance of this contract
+            uint256 balance = IERC20(token).balanceOf(address(this));
+
+            // Only process if balance > 0
+            if (balance > 0) {
+                // Transfer balance to kingVault
+                SafeERC20.safeTransfer(IERC20(token), kingVault, balance);
+
+                // Reset deposits tracking for this token
+                _deposits[token] = 0;
+
+                // Add to event arrays
+                tokens[count] = token;
+                amounts[count] = balance;
+                count++;
+            }
+        }
+
+        // Resize arrays to actual count (remove empty slots)
+        address[] memory finalTokens = new address[](count);
+        uint256[] memory finalAmounts = new uint256[](count);
+        for (uint256 i = 0; i < count; i++) {
+            finalTokens[i] = tokens[i];
+            finalAmounts[i] = amounts[i];
+        }
+
+        // Emit event with withdrawn tokens and amounts
+        emit EmergencyWithdraw(finalTokens, finalAmounts, block.timestamp);
+    }
+
+    // ============================================
     // Internal Asset Registration
     // ============================================
 

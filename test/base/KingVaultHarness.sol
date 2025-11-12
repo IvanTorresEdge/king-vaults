@@ -128,26 +128,6 @@ contract KingVaultHarness is KingVault {
     }
 
     /**
-     * @notice Stub implementation of withdraw for testing
-     * @dev Full implementation in Task 3.1
-     */
-    function withdraw(
-        address[] memory, /* _tokens */
-        uint256[] memory, /* _amounts */
-        address /* _receiver */
-    ) external pure override {
-        revert("Withdraw not implemented yet");
-    }
-
-    /**
-     * @notice Stub implementation of emergencyWithdraw for testing
-     * @dev Full implementation in Task 3.2
-     */
-    function emergencyWithdraw() external pure override {
-        revert("EmergencyWithdraw not implemented yet");
-    }
-
-    /**
      * @notice Pause vault operations
      * @dev Callable by owner OR King's core vault
      */
