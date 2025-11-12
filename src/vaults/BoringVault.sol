@@ -87,6 +87,66 @@ contract BoringVault is KingVault {
     uint64 public withdrawalDuration;
 
     // ============================================
+    // Internal State
+    // ============================================
+
+    /**
+     * @notice Pending shares committed to withdrawal
+     * @dev Only one withdrawal request at a time (single _pendingShares tracks all pending)
+     * @dev Set when withdrawFromVault() or harvestProfits() called
+     * @dev Cleared when completePrincipalWithdraw() or distributeProfits() called
+     * @dev Prevents concurrent withdrawal requests
+     */
+    uint256 internal _pendingShares;
+
+    /**
+     * @notice Tracks withdrawal request details per asset
+     * @dev asset => WithdrawalRequest struct
+     * @dev Only one withdrawal request per asset at a time
+     * @dev Deleted after confirmation or cancellation
+     * @dev THE ONLY THING WE TRACK: In-transit assets during withdrawals
+     */
+    mapping(address => WithdrawalRequest) internal _withdrawalRequests;
+
+    /**
+     * @notice Tracks profit assets queued for distribution (Type B withdrawals)
+     * @dev asset => amount queued
+     * @dev Incremented when harvestProfits() queues profit withdrawal
+     * @dev Cleared when distributeProfits() completes
+     * @dev Protects profit assets from being withdrawn as principal
+     * @dev CRITICAL: Used by availableForWithdraw() to prevent accounting errors
+     */
+    mapping(address => uint256) private _queuedProfits;
+
+    /**
+     * @notice Tracks principal assets queued for return to main vault (Type A withdrawals)
+     * @dev asset => amount queued
+     * @dev Incremented when withdrawFromVault() queues principal withdrawal
+     * @dev Cleared when completePrincipalWithdraw() completes
+     * @dev CRITICAL: Used by availableForWithdraw() to prevent over-withdrawal
+     */
+    mapping(address => uint256) private _queuedWithdraw;
+
+    // ============================================
+    // Structs
+    // ============================================
+
+    /**
+     * @notice Withdrawal request details
+     * @dev Stored in _withdrawalRequests mapping
+     * @param asset ERC-20 token address we expect to receive
+     * @param offer Asset amount offered for shares (IN-TRANSIT ASSET TRACKING)
+     * @param want Share amount we want to withdraw
+     * @param deadline Unix timestamp after which request expires (can be cancelled)
+     */
+    struct WithdrawalRequest {
+        address asset; // Asset we expect to receive
+        uint256 offer; // Asset amount offered for shares
+        uint256 want; // Share amount we want to withdraw
+        uint64 deadline; // Request deadline timestamp
+    }
+
+    // ============================================
     // Constants
     // ============================================
 
