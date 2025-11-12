@@ -3,6 +3,8 @@ pragma solidity ^0.8.25;
 
 import {KingVaultStorage} from "./KingVaultStorage.sol";
 import {IKingVault} from "../interfaces/IKingVault.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /**
  * @title KingVault
@@ -53,6 +55,51 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
         if (_tokens.length > 0) {
             _registerAssets(_tokens, _accepted);
         }
+    }
+
+    // ============================================
+    // Deposit Management
+    // ============================================
+
+    /**
+     * @notice Deposit tokens from King's core vault to this vault
+     * @dev Only callable by King's core vault (kingVault address)
+     * @dev Validates arrays, token acceptance, and amounts before transferring
+     * @param _tokens Array of token addresses to deposit
+     * @param _amounts Array of amounts to deposit (must match tokens length)
+     */
+    function deposit(address[] memory _tokens, uint256[] memory _amounts) external override {
+        // Access control: only kingVault can call
+        _requireKingVault();
+
+        // Pause check: cannot deposit when paused
+        _requireNotPaused();
+
+        // Validate arrays non-empty and matching length
+        if (_tokens.length == 0 || _tokens.length != _amounts.length) {
+            revert InvalidTokenArray();
+        }
+
+        // Process each token deposit
+        for (uint256 i = 0; i < _tokens.length; i++) {
+            address token = _tokens[i];
+            uint256 amount = _amounts[i];
+
+            // Validate amount > 0
+            if (amount == 0) revert ZeroAmount();
+
+            // Validate token is accepted
+            if (!_registeredTokens[token]) revert TokenNotAccepted(token);
+
+            // Transfer tokens from kingVault to this contract
+            SafeERC20.safeTransferFrom(IERC20(token), msg.sender, address(this), amount);
+
+            // Update deposits mapping (principal tracking)
+            _deposits[token] += amount;
+        }
+
+        // Emit event with all tokens and amounts
+        emit Deposited(_tokens, _amounts, block.timestamp);
     }
 
     // ============================================
