@@ -193,6 +193,115 @@ contract BoringVault is KingVault {
     error NoProfitsQueued();
 
     // ============================================
+    // Events
+    // ============================================
+
+    /**
+     * @notice Emitted when assets are successfully deposited to BoringVault via Teller
+     * @dev Indicates atomic deposit completed and shares received
+     * @param token ERC-20 token address deposited
+     * @param amount Token amount deposited to Teller
+     * @param sharesReceived BoringVault share tokens minted
+     */
+    event DepositCompleted(address indexed token, uint256 amount, uint256 sharesReceived);
+
+    /**
+     * @notice Emitted when withdrawal request is queued in AtomicQueue
+     * @dev Indicates shares committed to pending withdrawal (Type A or Type B)
+     * @param asset ERC-20 token address we expect to receive
+     * @param shareAmount BoringVault shares offered for withdrawal
+     * @param expectedAmount Asset amount expected from solver
+     * @param deadline Unix timestamp after which request expires
+     */
+    event WithdrawalQueued(
+        address indexed asset,
+        uint256 shareAmount,
+        uint256 expectedAmount,
+        uint64 deadline
+    );
+
+    /**
+     * @notice Emitted when withdrawal is fulfilled by solver
+     * @dev Indicates assets received and shares transferred to solver
+     * @param asset ERC-20 token address received
+     * @param amountReceived Actual asset amount received from solver
+     */
+    event WithdrawalConfirmed(address indexed asset, uint256 amountReceived);
+
+    /**
+     * @notice Emitted when withdrawal request is cancelled before fulfillment
+     * @dev Shares returned to available pool, accounting restored
+     * @param asset ERC-20 token address of cancelled request
+     * @param shareAmount BoringVault shares returned to available pool
+     */
+    event WithdrawalCancelled(address indexed asset, uint256 shareAmount);
+
+    /**
+     * @notice Emitted when profit shares are queued for withdrawal (Type B)
+     * @dev Tracks profit harvest initiation before solver fulfillment
+     * @param profitShares BoringVault shares representing profits
+     * @param profitValue ETH-denominated value of profit shares
+     */
+    event ProfitSharesQueued(uint256 profitShares, uint256 profitValue);
+
+    /**
+     * @notice Emitted when principal withdrawal completes (Type A)
+     * @dev Assets returned to King main vault after solver fulfills
+     * @param asset ERC-20 token address withdrawn
+     * @param amount Asset amount transferred to receiver
+     * @param receiver Address receiving assets (King main vault)
+     * @param timestamp Block timestamp of completion
+     */
+    event PrincipalWithdrawCompleted(
+        address indexed asset,
+        uint256 amount,
+        address indexed receiver,
+        uint256 timestamp
+    );
+
+    /**
+     * @notice Emitted when principal withdrawal request is cancelled (Type A)
+     * @dev Principal deposits restored, queued tracking cleared
+     * @param asset ERC-20 token address of cancelled withdrawal
+     * @param amount Asset amount that was queued (now restored)
+     * @param timestamp Block timestamp of cancellation
+     */
+    event WithdrawFromVaultCancelled(address indexed asset, uint256 amount, uint256 timestamp);
+
+    /**
+     * @notice Emitted when profit harvest request is cancelled (Type B)
+     * @dev Profit shares returned to vault, queued profit tracking cleared
+     * @param asset ERC-20 token address of cancelled harvest
+     * @param amount Asset amount that was queued for distribution
+     * @param timestamp Block timestamp of cancellation
+     */
+    event ProfitsHarvestCancelled(address indexed asset, uint256 amount, uint256 timestamp);
+
+    /**
+     * @notice Emitted when maximum slippage tolerance is updated
+     * @dev Affects deposit slippage protection calculations
+     * @param oldSlippage Previous slippage in basis points
+     * @param newSlippage New slippage in basis points
+     */
+    event MaxSlippageUpdated(uint16 oldSlippage, uint16 newSlippage);
+
+    /**
+     * @notice Emitted when AtomicQueue address is updated
+     * @dev Can only be changed when no pending withdrawals exist
+     * @param oldQueue Previous AtomicQueue address
+     * @param newQueue New AtomicQueue address
+     */
+    event AtomicQueueUpdated(address indexed oldQueue, address indexed newQueue);
+
+    /**
+     * @notice Emitted when withdrawal duration default is updated
+     * @dev Affects deadline calculation for new withdrawal requests
+     * @param oldDuration Previous duration in seconds
+     * @param newDuration New duration in seconds
+     */
+    event WithdrawalDurationUpdated(uint64 oldDuration, uint64 newDuration);
+
+    // ============================================
     // Storage Gap
     // ============================================
 
