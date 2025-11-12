@@ -252,7 +252,7 @@ contract KingVaultSetProfitsDistributionTest is Test {
         address[] memory recipients = new address[](0);
         uint16[] memory percents = new uint16[](0);
 
-        vm.expectRevert(abi.encodeWithSelector(IKingVault.InvalidTokenArray.selector));
+        vm.expectRevert(abi.encodeWithSelector(IKingVault.InvalidAssetArray.selector));
         vm.prank(owner);
         vault.setProfitsDistribution(recipients, percents);
     }
@@ -265,7 +265,7 @@ contract KingVaultSetProfitsDistributionTest is Test {
         uint16[] memory percents = new uint16[](1);
         percents[0] = HUNDRED_PERCENT;
 
-        vm.expectRevert(abi.encodeWithSelector(IKingVault.InvalidTokenArray.selector));
+        vm.expectRevert(abi.encodeWithSelector(IKingVault.InvalidAssetArray.selector));
         vm.prank(owner);
         vault.setProfitsDistribution(recipients, percents);
     }

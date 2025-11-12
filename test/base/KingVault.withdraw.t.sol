@@ -262,7 +262,7 @@ contract KingVaultWithdrawTest is Test {
 
         // Act & Assert
         vm.prank(kingVault);
-        vm.expectRevert(IKingVault.InvalidTokenArray.selector);
+        vm.expectRevert(IKingVault.InvalidAssetArray.selector);
         vault.withdraw(tokens, amounts, receiver);
     }
 
@@ -276,7 +276,7 @@ contract KingVaultWithdrawTest is Test {
 
         // Act & Assert
         vm.prank(kingVault);
-        vm.expectRevert(IKingVault.InvalidTokenArray.selector);
+        vm.expectRevert(IKingVault.InvalidAssetArray.selector);
         vault.withdraw(tokens, amounts, receiver);
     }
 }

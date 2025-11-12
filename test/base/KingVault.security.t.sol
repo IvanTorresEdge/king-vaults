@@ -227,7 +227,7 @@ contract KingVaultSecurityTest is Test {
         address[] memory tokens = new address[](0);
         uint256[] memory amounts = new uint256[](0);
 
-        vm.expectRevert(IKingVault.InvalidTokenArray.selector);
+        vm.expectRevert(IKingVault.InvalidAssetArray.selector);
         vm.prank(kingVault);
         vault.deposit(tokens, amounts);
     }
@@ -236,7 +236,7 @@ contract KingVaultSecurityTest is Test {
         address[] memory tokens = new address[](0);
         uint256[] memory amounts = new uint256[](0);
 
-        vm.expectRevert(IKingVault.InvalidTokenArray.selector);
+        vm.expectRevert(IKingVault.InvalidAssetArray.selector);
         vm.prank(kingVault);
         vault.withdraw(tokens, amounts, kingVault);
     }
@@ -261,7 +261,7 @@ contract KingVaultSecurityTest is Test {
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = 100e18;
 
-        vm.expectRevert(IKingVault.InvalidTokenArray.selector);
+        vm.expectRevert(IKingVault.InvalidAssetArray.selector);
         vm.prank(kingVault);
         vault.deposit(tokens, amounts);
     }
@@ -274,7 +274,7 @@ contract KingVaultSecurityTest is Test {
         amounts[0] = 100e18;
         amounts[1] = 50e18;
 
-        vm.expectRevert(IKingVault.InvalidTokenArray.selector);
+        vm.expectRevert(IKingVault.InvalidAssetArray.selector);
         vm.prank(kingVault);
         vault.withdraw(tokens, amounts, kingVault);
     }

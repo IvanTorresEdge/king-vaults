@@ -12,29 +12,29 @@ interface IKingVault {
     // ============================================
 
     /**
-     * @notice Emitted when King's core vault deposits tokens to this vault
-     * @param tokens Array of token addresses deposited
-     * @param amounts Array of amounts deposited (matching tokens array)
+     * @notice Emitted when King's core vault deposits assets to this vault
+     * @param assets Array of asset addresses deposited
+     * @param amounts Array of amounts deposited (matching assets array)
      * @param timestamp Block timestamp of deposit
      */
-    event Deposited(address[] tokens, uint256[] amounts, uint256 timestamp);
+    event Deposited(address[] assets, uint256[] amounts, uint256 timestamp);
 
     /**
-     * @notice Emitted when King's core vault withdraws tokens from this vault
-     * @param tokens Array of token addresses withdrawn
-     * @param amounts Array of amounts withdrawn (matching tokens array)
-     * @param receiver Address receiving the withdrawn tokens
+     * @notice Emitted when King's core vault withdraws assets from this vault
+     * @param assets Array of asset addresses withdrawn
+     * @param amounts Array of amounts withdrawn (matching assets array)
+     * @param receiver Address receiving the withdrawn assets
      * @param timestamp Block timestamp of withdrawal
      */
-    event Withdrawn(address[] tokens, uint256[] amounts, address receiver, uint256 timestamp);
+    event Withdrawn(address[] assets, uint256[] amounts, address receiver, uint256 timestamp);
 
     /**
      * @notice Emitted when emergency withdrawal is executed
-     * @param tokens Array of token addresses withdrawn
-     * @param amounts Array of amounts withdrawn (matching tokens array)
+     * @param assets Array of asset addresses withdrawn
+     * @param amounts Array of amounts withdrawn (matching assets array)
      * @param timestamp Block timestamp of emergency withdrawal
      */
-    event EmergencyWithdraw(address[] tokens, uint256[] amounts, uint256 timestamp);
+    event EmergencyWithdraw(address[] assets, uint256[] amounts, uint256 timestamp);
 
     /**
      * @notice Emitted when vault harvests profits from underlying protocols
@@ -45,13 +45,13 @@ interface IKingVault {
     /**
      * @notice Emitted when profits are distributed to recipients
      * @param recipients Array of recipient addresses
-     * @param tokens Array of token addresses distributed
-     * @param amounts 2D array of amounts distributed [recipient][token]
+     * @param assets Array of asset addresses distributed
+     * @param amounts 2D array of amounts distributed [recipient][asset]
      * @param timestamp Block timestamp of distribution
      */
     event ProfitsDistributed(
         address[] recipients,
-        address[] tokens,
+        address[] assets,
         uint256[][] amounts,
         uint256 timestamp
     );
@@ -67,16 +67,16 @@ interface IKingVault {
     // defined in PausableUpgradeable from OpenZeppelin
 
     /**
-     * @notice Emitted when a token is added to accepted tokens
-     * @param token Address of the token added
+     * @notice Emitted when an asset is added to accepted assets
+     * @param asset Address of the asset added
      */
-    event TokenAdded(address token);
+    event AssetAdded(address asset);
 
     /**
-     * @notice Emitted when a token is removed from accepted tokens
-     * @param token Address of the token removed
+     * @notice Emitted when an asset is removed from accepted assets
+     * @param asset Address of the asset removed
      */
-    event TokenRemoved(address token);
+    event AssetRemoved(address asset);
 
     /**
      * @notice Emitted when price provider is updated
@@ -110,23 +110,23 @@ interface IKingVault {
     error WhenNotPaused();
 
     /**
-     * @notice Thrown when a token is not accepted by this vault
-     * @param token Address of the token that is not accepted
+     * @notice Thrown when an asset is not accepted by this vault
+     * @param asset Address of the asset that is not accepted
      */
-    error TokenNotAccepted(address token);
+    error AssetNotAccepted(address asset);
 
     /**
      * @notice Thrown when vault has insufficient balance for withdrawal
-     * @param token Address of the token
+     * @param asset Address of the asset
      * @param requested Amount requested for withdrawal
      * @param available Amount available in vault
      */
-    error InsufficientBalance(address token, uint256 requested, uint256 available);
+    error InsufficientBalance(address asset, uint256 requested, uint256 available);
 
     /**
-     * @notice Thrown when token array is invalid (empty or mismatched lengths)
+     * @notice Thrown when asset array is invalid (empty or mismatched lengths)
      */
-    error InvalidTokenArray();
+    error InvalidAssetArray();
 
     /**
      * @notice Thrown when amount is zero
@@ -150,39 +150,39 @@ interface IKingVault {
     error InvalidPercentage();
 
     /**
-     * @notice Thrown when attempting to disable a token that has active deposits
-     * @param token Address of the token with deposits
+     * @notice Thrown when attempting to disable an asset that has active deposits
+     * @param asset Address of the asset with deposits
      * @param depositAmount Amount of deposits that must be withdrawn first
      */
-    error CannotDisableTokenWithDeposits(address token, uint256 depositAmount);
+    error CannotDisableAssetWithDeposits(address asset, uint256 depositAmount);
 
     /**
-     * @notice Thrown when TVL calculation encounters a token without available price
-     * @param token Address of the token without price data
+     * @notice Thrown when TVL calculation encounters an asset without available price
+     * @param asset Address of the asset without price data
      * @dev TVL calculation must revert rather than return partial/understated value
      */
-    error PriceNotAvailable(address token);
+    error PriceNotAvailable(address asset);
 
     // ============================================
     // Core Functions
     // ============================================
 
     /**
-     * @notice Deposit tokens from King's core vault to this vault
+     * @notice Deposit assets from King's core vault to this vault
      * @dev Only callable by King's core vault address
      * @dev Requires vault to not be paused
-     * @param _tokens Array of token addresses to deposit
-     * @param _amounts Array of amounts to deposit (must match tokens length)
+     * @param _tokens Array of asset addresses to deposit
+     * @param _amounts Array of amounts to deposit (must match assets length)
      */
     function deposit(address[] memory _tokens, uint256[] memory _amounts) external;
 
     /**
-     * @notice Withdraw idle tokens from this vault to receiver
+     * @notice Withdraw idle assets from this vault to receiver
      * @dev Only callable by King's core vault address
      * @dev Requires vault to not be paused
-     * @param _tokens Array of token addresses to withdraw
-     * @param _amounts Array of amounts to withdraw (must match tokens length)
-     * @param _receiver Address to receive the withdrawn tokens
+     * @param _tokens Array of asset addresses to withdraw
+     * @param _amounts Array of amounts to withdraw (must match assets length)
+     * @param _receiver Address to receive the withdrawn assets
      */
     function withdraw(
         address[] memory _tokens,
@@ -220,9 +220,9 @@ interface IKingVault {
     function harvestProfits() external;
 
     /**
-     * @notice Registers asset tokens (ERC-20)
+     * @notice Registers assets (ERC-20)
      * @dev Only callable by owner
-     * @param _tokens Array of token addresses to register
+     * @param _tokens Array of asset addresses to register
      * @param _accepted Array of acceptance status (true = accepted, false = not accepted)
      */
     function registerAssets(address[] memory _tokens, bool[] memory _accepted) external;
@@ -259,9 +259,54 @@ interface IKingVault {
 
     /**
      * @notice Get array of all registered and accepted assets
-     * @return Array of accepted token addresses (filters _assets where _registeredTokens[token] == true)
+     * @return Array of accepted asset addresses (filters _assets where _registeredTokens[token] == true)
      */
     function assets() external view returns (address[] memory);
+
+    /**
+     * @notice Get balances of all registered assets
+     * @dev Returns parallel arrays of assets and their balances (idle + deployed)
+     * @dev Used by King Protocol core contract for:
+     *      - Maximum weight validation (position limit checks)
+     *      - Redemption liquidity calculations
+     *      - Minting asset ratio verification
+     * @dev Arrays are parallel: _assets[i] corresponds to _amounts[i]
+     * @dev Balances include both idle assets in vault and assets deployed to underlying protocols
+     * @dev For BoringVault: returns principal tracked in _deposits mapping (not share value)
+     * @dev For TokenizedVault: may calculate differently based on internal mechanics
+     * @return _assets Array of registered asset addresses
+     * @return _amounts Array of corresponding balances for each asset
+     *
+     * @custom:example
+     * ```solidity
+     * (address[] memory assets, uint256[] memory amounts) = vault.getBalances();
+     * // assets[0] = 0xETHFI, amounts[0] = 1000e18 (1000 ETHFI principal)
+     * // assets[1] = 0xWETH, amounts[1] = 5e18 (5 WETH principal)
+     * ```
+     */
+    function getBalances() external view returns (address[] memory _assets, uint256[] memory _amounts);
+
+    /**
+     * @notice Get balance of a specific asset
+     * @dev Returns balance (idle + deployed) for the specified asset
+     * @dev Convenience method for querying single asset balance
+     * @dev Returns 0 if asset not registered in vault
+     * @dev Used by King Protocol core contract for asset-specific balance checks
+     * @dev For BoringVault: returns principal from _deposits[_asset]
+     * @dev For TokenizedVault: may calculate differently based on internal mechanics
+     * @param _asset Address of the asset to query
+     * @return _amount Balance of the specified asset
+     *
+     * @custom:example
+     * ```solidity
+     * uint256 ethfiBalance = vault.getBalance(0xETHFI);
+     * // Returns: 1000e18 (1000 ETHFI principal)
+     *
+     * uint256 unknownBalance = vault.getBalance(0xUnknownToken);
+     * // Returns: 0 (not registered)
+     * ```
+     */
+    function getBalance(address _asset) external view returns (uint256 _amount);
 
     // NOTE: The following view functions are not declared here because they are already
     // provided by parent contracts or public state variables:

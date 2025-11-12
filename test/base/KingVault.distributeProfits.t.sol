@@ -356,7 +356,7 @@ contract KingVaultDistributeProfitsTest is Test {
     function test_DistributeProfits_RevertsForNoRecipients() public {
         // Don't setup any distribution
 
-        vm.expectRevert(abi.encodeWithSelector(IKingVault.InvalidTokenArray.selector));
+        vm.expectRevert(abi.encodeWithSelector(IKingVault.InvalidAssetArray.selector));
         vm.prank(owner);
         vault.distributeProfits();
     }

@@ -27,8 +27,8 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
      * @param _owner Address of the owner (governance)
      * @param _kingVault Address of King's core vault (immutable after init)
      * @param _priceProvider Address of the price provider for TVL calculation
-     * @param _tokens Optional array of initial tokens to register
-     * @param _accepted Optional array of acceptance status for initial tokens
+     * @param _tokens Optional array of initial assets to register
+     * @param _accepted Optional array of acceptance status for initial assets
      */
     function __KingVault_init(
         address _owner,
@@ -65,11 +65,11 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
     // ============================================
 
     /**
-     * @notice Deposit tokens from King's core vault to this vault
+     * @notice Deposit assets from King's core vault to this vault
      * @dev Only callable by King's core vault (kingVault address)
-     * @dev Validates arrays, token acceptance, and amounts before transferring
-     * @param _tokens Array of token addresses to deposit
-     * @param _amounts Array of amounts to deposit (must match tokens length)
+     * @dev Validates arrays, asset acceptance, and amounts before transferring
+     * @param _tokens Array of asset addresses to deposit
+     * @param _amounts Array of amounts to deposit (must match assets length)
      */
     function deposit(address[] memory _tokens, uint256[] memory _amounts) external override {
         // Access control: only kingVault can call
@@ -80,7 +80,7 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
 
         // Validate arrays non-empty and matching length
         if (_tokens.length == 0 || _tokens.length != _amounts.length) {
-            revert InvalidTokenArray();
+            revert InvalidAssetArray();
         }
 
         // Process each token deposit
@@ -92,7 +92,7 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
             if (amount == 0) revert ZeroAmount();
 
             // Validate token is accepted
-            if (!_registeredTokens[token]) revert TokenNotAccepted(token);
+            if (!_registeredTokens[token]) revert AssetNotAccepted(token);
 
             // Transfer tokens from kingVault to this contract
             SafeERC20.safeTransferFrom(IERC20(token), msg.sender, address(this), amount);
@@ -110,12 +110,12 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
     // ============================================
 
     /**
-     * @notice Withdraw idle tokens from this vault to receiver
+     * @notice Withdraw idle assets from this vault to receiver
      * @dev Only callable by King's core vault (kingVault address)
      * @dev Validates arrays, amounts, and balance before transferring
-     * @param _tokens Array of token addresses to withdraw
-     * @param _amounts Array of amounts to withdraw (must match tokens length)
-     * @param _receiver Address to receive the withdrawn tokens
+     * @param _tokens Array of asset addresses to withdraw
+     * @param _amounts Array of amounts to withdraw (must match assets length)
+     * @param _receiver Address to receive the withdrawn assets
      */
     function withdraw(
         address[] memory _tokens,
@@ -133,7 +133,7 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
 
         // Validate arrays non-empty and matching length
         if (_tokens.length == 0 || _tokens.length != _amounts.length) {
-            revert InvalidTokenArray();
+            revert InvalidAssetArray();
         }
 
         // Process each token withdrawal
@@ -297,7 +297,7 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
 
         // Validate arrays non-empty and matching length
         if (_recipients.length == 0 || _recipients.length != _percentsBPS.length) {
-            revert InvalidTokenArray();
+            revert InvalidAssetArray();
         }
 
         // Process each recipient update
@@ -359,7 +359,7 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
 
         // Validate we have at least one recipient configured
         if (_profitsRecipients.length == 0) {
-            revert InvalidTokenArray(); // No recipients configured
+            revert InvalidAssetArray(); // No recipients configured
         }
 
         // Prepare event data structures
@@ -448,14 +448,14 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
 
     /**
      * @notice Internal function to register assets
-     * @dev Validates tokens and updates storage mappings
-     * @param _tokens Array of token addresses to register
-     * @param _accepted Array of acceptance status for tokens
+     * @dev Validates assets and updates storage mappings
+     * @param _tokens Array of asset addresses to register
+     * @param _accepted Array of acceptance status for assets
      */
     function _registerAssets(address[] memory _tokens, bool[] memory _accepted) internal virtual {
         // Validate arrays non-empty and matching length
         if (_tokens.length == 0 || _tokens.length != _accepted.length) {
-            revert InvalidTokenArray();
+            revert InvalidAssetArray();
         }
 
         // Loop through tokens and update registration
@@ -463,20 +463,20 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
             address token = _tokens[i];
             bool accepted = _accepted[i];
 
-            // Validate token address
+            // Validate asset address
             if (token == address(0)) revert ZeroAddress();
 
-            // Validate token has price available (ensures it's a valid token)
+            // Validate asset has price available (ensures it's a valid asset)
             if (!IPriceProvider(priceProvider).isPriceAvailable(token)) {
-                revert TokenNotAccepted(token);
+                revert AssetNotAccepted(token);
             }
 
             // Track previous registration status
             bool wasRegistered = _registeredTokens[token];
 
-            // Safety check: Prevent disabling token if deposits exist
+            // Safety check: Prevent disabling asset if deposits exist
             if (!accepted && _deposits[token] > 0) {
-                revert CannotDisableTokenWithDeposits(token, _deposits[token]);
+                revert CannotDisableAssetWithDeposits(token, _deposits[token]);
             }
 
             // Update registration status
@@ -485,16 +485,16 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
             // Add to assets array if accepted (only if not already present)
             if (accepted) {
                 _addToAssets(token);
-                // Emit TokenAdded if newly accepted
+                // Emit AssetAdded if newly accepted
                 if (!wasRegistered) {
-                    emit TokenAdded(token);
+                    emit AssetAdded(token);
                 }
             } else {
-                // Emit TokenRemoved if was previously registered
+                // Emit AssetRemoved if was previously registered
                 if (wasRegistered) {
-                    emit TokenRemoved(token);
+                    emit AssetRemoved(token);
                 }
-                // Note: Token stays in _assets array for audit trail
+                // Note: Asset stays in _assets array for audit trail
             }
         }
     }
@@ -504,9 +504,9 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
     // ============================================
 
     /**
-     * @notice Register or update asset tokens (ERC-20)
+     * @notice Register or update assets (ERC-20)
      * @dev Only callable by owner (governance)
-     * @param _tokens Array of token addresses to register
+     * @param _tokens Array of asset addresses to register
      * @param _accepted Array of acceptance status (true = accepted, false = not accepted)
      */
     function registerAssets(address[] memory _tokens, bool[] memory _accepted) external virtual override {
@@ -607,7 +607,7 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
 
     /**
      * @notice Get array of all registered and accepted assets
-     * @return acceptedTokens Array of accepted token addresses
+     * @return acceptedTokens Array of accepted asset addresses
      * @dev Filters _assets array by _registeredTokens[token] == true
      */
     function assets() external view override returns (address[] memory acceptedTokens) {
@@ -628,5 +628,41 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
                 index++;
             }
         }
+    }
+
+    /**
+     * @notice Get balances of all registered assets
+     * @dev Returns parallel arrays of assets and their balances from _deposits mapping
+     * @dev Balances represent principal deposits only (not current market value or share appreciation)
+     * @dev Specialized vaults may override to provide different balance calculations
+     * @return assetAddresses Array of all registered asset addresses
+     * @return amounts Array of principal amounts for each asset
+     */
+    function getBalances() external view virtual returns (address[] memory assetAddresses, uint256[] memory amounts) {
+        // Get all assets (registered and accepted)
+        assetAddresses = this.assets();
+
+        // Allocate amounts array with same length
+        amounts = new uint256[](assetAddresses.length);
+
+        // Fill amounts array with principal deposits
+        for (uint256 i = 0; i < assetAddresses.length; i++) {
+            amounts[i] = _deposits[assetAddresses[i]];
+        }
+
+        return (assetAddresses, amounts);
+    }
+
+    /**
+     * @notice Get balance of a specific asset
+     * @dev Returns principal deposit amount from _deposits mapping
+     * @dev Returns 0 if asset is not registered
+     * @dev Simpler alternative to getBalances() when only one asset needs checking
+     * @param _asset Address of the asset to query
+     * @return amount Principal deposit amount for the asset (0 if not registered)
+     */
+    function getBalance(address _asset) external view virtual returns (uint256 amount) {
+        // Return principal deposit for this asset (0 if not registered)
+        return _deposits[_asset];
     }
 }

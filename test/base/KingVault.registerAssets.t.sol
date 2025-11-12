@@ -49,7 +49,7 @@ contract KingVaultRegisterAssetsTest is Test {
     // Safety Check Tests
     // ============================================
 
-    function test_RegisterAssets_CannotDisableTokenWithDeposits() public {
+    function test_RegisterAssets_CannotDisableAssetWithDeposits() public {
         // Register USDC as accepted
         address[] memory tokens = new address[](1);
         tokens[0] = address(usdc);
@@ -79,7 +79,7 @@ contract KingVaultRegisterAssetsTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSignature(
-                "CannotDisableTokenWithDeposits(address,uint256)",
+                "CannotDisableAssetWithDeposits(address,uint256)",
                 address(usdc),
                 1000e6
             )
@@ -177,7 +177,7 @@ contract KingVaultRegisterAssetsTest is Test {
         // Should revert because USDC has deposits
         vm.expectRevert(
             abi.encodeWithSignature(
-                "CannotDisableTokenWithDeposits(address,uint256)",
+                "CannotDisableAssetWithDeposits(address,uint256)",
                 address(usdc),
                 1000e6
             )

@@ -193,7 +193,7 @@ contract KingVaultDepositTest is Test {
 
         // Act & Assert
         vm.prank(kingVault);
-        vm.expectRevert(abi.encodeWithSelector(IKingVault.TokenNotAccepted.selector, address(unacceptedToken)));
+        vm.expectRevert(abi.encodeWithSelector(IKingVault.AssetNotAccepted.selector, address(unacceptedToken)));
         vault.deposit(tokens, amounts);
     }
 
@@ -240,7 +240,7 @@ contract KingVaultDepositTest is Test {
 
         // Act & Assert
         vm.prank(kingVault);
-        vm.expectRevert(IKingVault.InvalidTokenArray.selector);
+        vm.expectRevert(IKingVault.InvalidAssetArray.selector);
         vault.deposit(tokens, amounts);
     }
 
@@ -254,7 +254,7 @@ contract KingVaultDepositTest is Test {
 
         // Act & Assert
         vm.prank(kingVault);
-        vm.expectRevert(IKingVault.InvalidTokenArray.selector);
+        vm.expectRevert(IKingVault.InvalidAssetArray.selector);
         vault.deposit(tokens, amounts);
     }
 

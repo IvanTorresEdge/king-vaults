@@ -62,7 +62,7 @@ contract KingVaultHarness is KingVault {
 
             // Safety check: Prevent disabling token if deposits exist
             if (!accepted && _deposits[token] > 0) {
-                revert CannotDisableTokenWithDeposits(token, _deposits[token]);
+                revert CannotDisableAssetWithDeposits(token, _deposits[token]);
             }
 
             // Update registration status
@@ -75,9 +75,9 @@ contract KingVaultHarness is KingVault {
 
             // Emit appropriate event
             if (accepted) {
-                emit TokenAdded(token);
+                emit AssetAdded(token);
             } else {
-                emit TokenRemoved(token);
+                emit AssetRemoved(token);
             }
         }
     }
