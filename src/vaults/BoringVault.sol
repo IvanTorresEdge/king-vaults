@@ -8,6 +8,8 @@ import {IAccountantWithRateProviders} from "../interfaces/external/IAccountantWi
 import {IAtomicQueue} from "../interfaces/external/IAtomicQueue.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /**
  * @title BoringVault
@@ -192,6 +194,13 @@ contract BoringVault is KingVault {
      */
     error NoProfitsQueued();
 
+    /**
+     * @notice Thrown when slippage protection fails (received < expected)
+     * @param expected Expected shares based on accountant rate
+     * @param received Actual shares received from deposit
+     */
+    error SlippageExceeded(uint256 expected, uint256 received);
+
     // ============================================
     // Events
     // ============================================
@@ -368,6 +377,213 @@ contract BoringVault is KingVault {
         atomicQueue = _atomicQueue;
         maxSlippageBPS = DEFAULT_SLIPPAGE_BPS;
         withdrawalDuration = 7 days;
+    }
+
+    // ============================================
+    // Core Vault Operations
+    // ============================================
+
+    /**
+     * @notice Deploy idle assets to BoringVault via Teller (atomic operation)
+     * @dev Owner-only function to deploy assets from this vault to Veda BoringVault
+     * @dev Atomic operation: assets transferred and shares received in single transaction
+     * @dev Does NOT modify _deposits (only King main vault modifies principal tracking)
+     * @dev Slippage protection: minimumMint calculated from maxSlippageBPS
+     *
+     * @param _asset ERC-20 token address to deposit
+     * @param _amount Token amount to deposit
+     * @return shares Amount of BoringVault shares received
+     *
+     * @custom:validation Asset must be registered via registerAssets()
+     * @custom:validation Amount must be > 0
+     * @custom:validation Contract must have sufficient idle balance
+     * @custom:validation Teller must not be paused
+     * @custom:validation Contract must not be paused
+     *
+     * @custom:security Approves BoringVault (NOT Teller) to spend assets
+     * @custom:security Slippage protection via minimumMint calculation
+     * @custom:security Verifies shares received >= minimumMint
+     *
+     * Workflow:
+     * 1. Validate inputs (registered asset, amount > 0, sufficient balance)
+     * 2. Calculate expected shares using accountant rate
+     * 3. Apply slippage protection: minShares = expected × (10000 - maxSlippageBPS) / 10000
+     * 4. Record share balance before deposit
+     * 5. Approve BoringVault to spend assets
+     * 6. Call Teller.deposit() with slippage protection
+     * 7. Verify shares received >= minShares
+     * 8. Emit DepositCompleted event
+     *
+     * Example:
+     * ```solidity
+     * // Deploy 1000 ETHFI to BoringVault
+     * uint256 shares = boringVault.depositToVault(ETHFI, 1000e18);
+     * // Shares received based on current exchange rate
+     * // _deposits[ETHFI] unchanged (managed by King main vault)
+     * ```
+     */
+    function depositToVault(
+        address _asset,
+        uint256 _amount
+    ) external onlyOwner whenNotPaused returns (uint256 shares) {
+        // Validate inputs
+        if (!_registeredTokens[_asset]) revert AssetNotAccepted(_asset);
+        if (_amount == 0) revert ZeroAmount();
+
+        // Check sufficient idle balance
+        uint256 idle = IERC20(_asset).balanceOf(address(this));
+        if (idle < _amount) {
+            revert InsufficientAvailableBalance(_asset, _amount, idle);
+        }
+
+        // Calculate expected shares and apply slippage protection
+        uint256 expectedShares = _calculateExpectedShares(_asset, _amount);
+        uint256 minShares = (expectedShares * (10_000 - maxSlippageBPS)) / 10_000;
+
+        // Record share balance before deposit
+        uint256 sharesBefore = IERC20(vault).balanceOf(address(this));
+
+        // Approve BoringVault to spend assets (NOT Teller)
+        IERC20(_asset).approve(vault, _amount);
+
+        // Execute atomic deposit via Teller
+        shares = ITellerWithMultiAssetSupport(teller).deposit(
+            ERC20(_asset),
+            _amount,
+            minShares
+        );
+
+        // Verify shares received
+        uint256 sharesAfter = IERC20(vault).balanceOf(address(this));
+        uint256 sharesReceived = sharesAfter - sharesBefore;
+
+        if (sharesReceived < minShares) {
+            revert SlippageExceeded(expectedShares, sharesReceived);
+        }
+
+        // NOTE: _deposits[_asset] is NOT modified here
+        // Only King main vault modifies _deposits via deposit()/withdraw()
+        // This is governance deploying already-tracked assets to Veda
+
+        emit DepositCompleted(_asset, _amount, sharesReceived);
+
+        return sharesReceived;
+    }
+
+    // ============================================
+    // Internal Helpers
+    // ============================================
+
+    /**
+     * @notice Calculate expected shares for deposit amount
+     * @dev Queries Accountant for current exchange rate and converts assets to shares
+     * @dev Uses getRateInQuoteSafe() for safety (reverts if Accountant paused)
+     * @param _asset ERC-20 token address being deposited
+     * @param _amount Asset amount to convert to shares
+     * @return expectedShares Estimated shares to receive
+     *
+     * @custom:formula shares = amount × (10^decimals / rate)
+     * @custom:example 1000 ETHFI @ rate 2.0 → 500 shares (assuming 18 decimals)
+     */
+    function _calculateExpectedShares(
+        address _asset,
+        uint256 _amount
+    ) internal view returns (uint256 expectedShares) {
+        // Query current exchange rate for this asset
+        uint256 rate = IAccountantWithRateProviders(accountant).getRateInQuoteSafe(ERC20(_asset));
+        require(rate > 0, "Invalid rate");
+
+        // Get decimals for rate (typically 18)
+        uint8 decimals = IAccountantWithRateProviders(accountant).decimals();
+
+        // Calculate expected shares with proper decimals handling
+        // shares = amount × (10^decimals / rate)
+        expectedShares = Math.mulDiv(_amount, 10 ** decimals, rate);
+    }
+
+    /**
+     * @notice Calculate total ETH value of current vault shares
+     * @dev Queries current share balance and converts to ETH using Accountant rate
+     * @dev Uses getRate() (not Safe variant) since this is view-only calculation
+     * @return value Total value in ETH (18 decimals)
+     *
+     * @custom:formula value = shares × rate / (10^decimals)
+     * @custom:example 500 shares @ rate 2.4 → 1200 ETH
+     */
+    function _calculateVaultShareValue() internal view returns (uint256 value) {
+        // Get current share balance
+        uint256 shares = IERC20(vault).balanceOf(address(this));
+
+        if (shares == 0) return 0;
+
+        // Query current exchange rate
+        uint256 rate = IAccountantWithRateProviders(accountant).getRate();
+        require(rate > 0, "Invalid rate");
+
+        // Get decimals for rate
+        uint8 decimals = IAccountantWithRateProviders(accountant).decimals();
+
+        // Calculate value with proper decimals handling
+        // value = shares × rate / (10^decimals)
+        value = Math.mulDiv(shares, rate, 10 ** decimals);
+    }
+
+    /**
+     * @notice Calculate expected asset amount from share amount
+     * @dev Converts shares to assets using current Accountant exchange rate
+     * @dev Used for withdrawal calculations
+     * @param _asset ERC-20 token address we expect to receive
+     * @param _shareAmount BoringVault shares to convert
+     * @return expectedAmount Asset amount we expect to receive
+     *
+     * @custom:formula assets = shares × rate / (10^decimals)
+     * @custom:example 100 shares @ rate 2.4 → 240 WETH
+     */
+    function _calculateExpectedAssets(
+        address _asset,
+        uint256 _shareAmount
+    ) internal view returns (uint256 expectedAmount) {
+        // Query current exchange rate for this asset
+        uint256 rate = IAccountantWithRateProviders(accountant).getRateInQuoteSafe(ERC20(_asset));
+        require(rate > 0, "Invalid rate");
+
+        // Get decimals for rate
+        uint8 decimals = IAccountantWithRateProviders(accountant).decimals();
+
+        // Calculate expected assets with proper decimals handling
+        // assets = shares × rate / (10^decimals)
+        expectedAmount = Math.mulDiv(_shareAmount, rate, 10 ** decimals);
+    }
+
+    /**
+     * @notice Calculate atomic price for AtomicQueue withdrawal request
+     * @dev Applies slippage protection to expected amount and calculates price per share
+     * @dev Result must fit in uint88 for AtomicRequest struct
+     * @param _shareAmount BoringVault shares we're offering
+     * @param _expectedAmount Asset amount we expect (before slippage)
+     * @return atomicPrice Minimum price per share (in asset terms, 18 decimals)
+     *
+     * @custom:formula atomicPrice = minAmount × (10^decimals) / shares
+     * @custom:formula minAmount = expectedAmount × (10000 - slippage) / 10000
+     * @custom:example 100 shares for 240 WETH, 50 BPS slippage → price = 239.88 / 100 = 2.3988
+     */
+    function _calculateAtomicPrice(
+        address, /* _asset - unused but kept for interface consistency */
+        uint256 _shareAmount,
+        uint256 _expectedAmount
+    ) internal view returns (uint256 atomicPrice) {
+        // Apply slippage protection to expected amount
+        uint256 minAmount = Math.mulDiv(_expectedAmount, 10_000 - maxSlippageBPS, 10_000);
+
+        // Get decimals for price calculation
+        uint8 decimals = IAccountantWithRateProviders(accountant).decimals();
+
+        // Calculate atomic price: minAmount per share
+        // atomicPrice = minAmount × (10^decimals) / shares
+        atomicPrice = Math.mulDiv(minAmount, 10 ** decimals, _shareAmount);
+
+        // Ensure result fits in uint88 (AtomicRequest struct limitation)
+        require(atomicPrice <= type(uint88).max, "Atomic price overflow");
     }
 
     // ============================================
