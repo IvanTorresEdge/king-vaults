@@ -121,7 +121,7 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
         address[] memory _tokens,
         uint256[] memory _amounts,
         address _receiver
-    ) external override {
+    ) external virtual override {
         // Access control: only kingVault can call
         _requireKingVault();
 

@@ -470,6 +470,277 @@ contract BoringVault is KingVault {
         return sharesReceived;
     }
 
+    /**
+     * @notice Queue withdrawal of assets from BoringVault (principal return, Type A)
+     * @dev Owner-only function to queue principal withdrawal via AtomicQueue
+     * @dev Asynchronous operation: Request queued → solver fulfills → call completePrincipalWithdraw()
+     * @dev DUAL TRACKING: Increments _queuedWithdraw[_asset] to protect from profit contamination
+     *
+     * @param _asset ERC-20 token address we want to receive
+     * @param _shareAmount BoringVault shares to withdraw
+     * @param _deadline Unix timestamp for request expiration (0 = use default withdrawalDuration)
+     */
+    function withdrawFromVault(
+        address _asset,
+        uint256 _shareAmount,
+        uint64 _deadline
+    ) external onlyOwner whenNotPaused {
+        // Validate inputs
+        if (_shareAmount == 0) revert ZeroAmount();
+        if (!_registeredTokens[_asset]) revert AssetNotAccepted(_asset);
+
+        // Check no pending withdrawal for this asset
+        if (_withdrawalRequests[_asset].deadline > 0) {
+            revert WithdrawalNotQueued();
+        }
+
+        // Check sufficient available shares
+        uint256 currentShares = IERC20(vault).balanceOf(address(this));
+        uint256 availableShares = currentShares - _pendingShares;
+
+        if (_shareAmount > availableShares) {
+            revert InsufficientAvailableBalance(vault, _shareAmount, availableShares);
+        }
+
+        // Calculate deadline (use default if not provided)
+        uint64 deadline = _deadline == 0 ? uint64(block.timestamp) + withdrawalDuration : _deadline;
+
+        // Calculate expected asset amount from shares
+        uint256 expectedAmount = _calculateExpectedAssets(_asset, _shareAmount);
+
+        // Calculate atomic price with slippage protection
+        uint256 atomicPrice = _calculateAtomicPrice(_asset, _shareAmount, expectedAmount);
+
+        // Create AtomicRequest struct
+        IAtomicQueue.AtomicRequest memory request = IAtomicQueue.AtomicRequest({
+            deadline: deadline,
+            atomicPrice: uint88(atomicPrice),
+            offerAmount: uint96(_shareAmount),
+            inSolve: false
+        });
+
+        // Approve AtomicQueue to spend shares
+        IERC20(vault).approve(atomicQueue, _shareAmount);
+
+        // Queue withdrawal in AtomicQueue
+        IAtomicQueue(atomicQueue).updateAtomicRequest(
+            ERC20(vault), // offer: BoringVault shares
+            ERC20(_asset), // want: Asset we expect to receive
+            request
+        );
+
+        // Store withdrawal request details
+        _withdrawalRequests[_asset] = WithdrawalRequest({
+            asset: _asset,
+            offer: expectedAmount, // IN-TRANSIT ASSET TRACKING
+            want: _shareAmount,
+            deadline: deadline
+        });
+
+        // Update pending shares
+        _pendingShares += _shareAmount;
+
+        // DUAL TRACKING: Increment queued withdraw (Type A tracking)
+        _queuedWithdraw[_asset] += expectedAmount;
+
+        emit WithdrawalQueued(_asset, _shareAmount, expectedAmount, deadline);
+    }
+
+    /**
+     * @notice Complete principal withdrawal after solver fulfillment (Type A)
+     * @dev Owner-only function to finalize principal return to King main vault
+     * @dev Call this after solver has fulfilled the AtomicQueue request
+     * @dev DUAL TRACKING: Decrements _queuedWithdraw[_asset] to clear Type A tracking
+     *
+     * @param _asset ERC-20 token address received from solver
+     * @param _amount Asset amount to transfer to receiver
+     * @param _receiver Address to receive assets (typically King main vault)
+     */
+    function completePrincipalWithdraw(
+        address _asset,
+        uint256 _amount,
+        address _receiver
+    ) external onlyOwner whenNotPaused {
+        // Validate withdrawal request exists
+        WithdrawalRequest memory request = _withdrawalRequests[_asset];
+        if (request.deadline == 0) {
+            revert WithdrawalNotQueued();
+        }
+
+        // Validate amount is within queued range
+        uint256 queuedAmount = _queuedWithdraw[_asset];
+        if (_amount > queuedAmount) {
+            revert InsufficientAvailableBalance(_asset, _amount, queuedAmount);
+        }
+
+        // Validate receiver
+        if (_receiver == address(0)) revert ZeroAddress();
+
+        // Check sufficient idle balance
+        uint256 idle = IERC20(_asset).balanceOf(address(this));
+        if (idle < _amount) {
+            revert InsufficientAvailableBalance(_asset, _amount, idle);
+        }
+
+        // Transfer assets to receiver (main vault)
+        SafeERC20.safeTransfer(IERC20(_asset), _receiver, _amount);
+
+        // DUAL TRACKING: Decrement queued withdraw (clear Type A tracking)
+        _queuedWithdraw[_asset] -= _amount;
+
+        // Delete withdrawal request
+        delete _withdrawalRequests[_asset];
+
+        // Reset pending shares
+        _pendingShares = 0;
+
+        emit PrincipalWithdrawCompleted(_asset, _amount, _receiver, block.timestamp);
+    }
+
+    /**
+     * @notice Cancel pending principal withdrawal request (Type A)
+     * @dev Owner-only function to cancel unfulfilled withdrawal and restore state
+     * @dev CRITICAL: Restores _deposits[_asset] since parent optimistically reduced it
+     * @dev DUAL TRACKING: Decrements _queuedWithdraw[_asset] to clear Type A tracking
+     *
+     * @param _asset ERC-20 token address of withdrawal to cancel
+     */
+    function cancelWithdrawFromVault(address _asset) external onlyOwner whenNotPaused {
+        // Validate withdrawal request exists
+        WithdrawalRequest memory request = _withdrawalRequests[_asset];
+        if (request.deadline == 0) {
+            revert NoWithdrawalQueued();
+        }
+
+        // Get queued amount (must be > 0)
+        uint256 queuedAmount = _queuedWithdraw[_asset];
+        if (queuedAmount == 0) {
+            revert NoWithdrawalQueued();
+        }
+
+        // Create empty AtomicRequest to cancel
+        IAtomicQueue.AtomicRequest memory emptyRequest =
+            IAtomicQueue.AtomicRequest({deadline: 0, atomicPrice: 0, offerAmount: 0, inSolve: false});
+
+        // Cancel withdrawal in AtomicQueue
+        IAtomicQueue(atomicQueue).updateAtomicRequest(
+            ERC20(vault), // offer: BoringVault shares
+            ERC20(_asset), // want: Asset
+            emptyRequest
+        );
+
+        // CRITICAL: Restore principal deposits (was reduced optimistically)
+        _deposits[_asset] += queuedAmount;
+
+        // DUAL TRACKING: Decrement queued withdraw (clear Type A tracking)
+        _queuedWithdraw[_asset] -= queuedAmount;
+
+        // Delete withdrawal request
+        delete _withdrawalRequests[_asset];
+
+        // Reset pending shares
+        _pendingShares = 0;
+
+        emit WithdrawFromVaultCancelled(_asset, queuedAmount, block.timestamp);
+    }
+
+    /**
+     * @notice Calculate available balance for principal withdrawals (protection function)
+     * @dev Prevents profit assets from being withdrawn as principal
+     * @dev DUAL TRACKING: Uses both _queuedProfits and _queuedWithdraw
+     *
+     * @param _asset ERC-20 token address to check
+     * @return available Amount available for principal withdrawal (after reserving profits)
+     */
+    function availableForWithdraw(address _asset) public view returns (uint256) {
+        // Get current idle balance
+        uint256 balance = IERC20(_asset).balanceOf(address(this));
+
+        // Get principal deposits (from parent)
+        uint256 principal = _deposits[_asset];
+
+        // Get queued amounts (dual tracking)
+        uint256 queuedProfits = _queuedProfits[_asset];
+        uint256 queuedWithdraw = _queuedWithdraw[_asset];
+
+        // Calculate total reserved amount
+        uint256 reserved = principal + queuedProfits + queuedWithdraw;
+
+        // Return available (with underflow protection)
+        if (balance <= reserved) return 0;
+        return balance - reserved;
+    }
+
+    /**
+     * @notice Withdraw assets from vault (overrides parent to add protection)
+     * @dev Only callable by King main vault
+     * @dev PROTECTION: Uses availableForWithdraw() to prevent profit contamination
+     *
+     * @param _assets ERC-20 token addresses to withdraw
+     * @param _amounts Token amounts to withdraw (parallel arrays)
+     * @param _receiver Address to receive withdrawn assets (King main vault)
+     */
+    function withdraw(address[] memory _assets, uint256[] memory _amounts, address _receiver)
+        external
+        override
+    {
+        // Access control: only kingVault can call
+        _requireKingVault();
+
+        // Pause check: cannot withdraw when paused
+        _requireNotPaused();
+        // Validate arrays
+        if (_assets.length != _amounts.length) revert InvalidAssetArray();
+        if (_receiver == address(0)) revert ZeroAddress();
+
+        // Process each asset
+        for (uint256 i = 0; i < _assets.length; i++) {
+            address asset = _assets[i];
+            uint256 amount = _amounts[i];
+
+            // Validate inputs
+            if (amount == 0) revert ZeroAmount();
+            if (!_registeredTokens[asset]) revert AssetNotAccepted(asset);
+
+            // Get idle balance
+            uint256 idle = IERC20(asset).balanceOf(address(this));
+
+            if (idle >= amount) {
+                // Sufficient idle balance, transfer directly
+                SafeERC20.safeTransfer(IERC20(asset), _receiver, amount);
+                _deposits[asset] -= amount;
+            } else {
+                // Need to withdraw from BoringVault
+                uint256 needed = amount - idle;
+
+                // PROTECTION: Check availability (prevents profit contamination)
+                uint256 available = availableForWithdraw(asset);
+                if (needed > available) {
+                    revert InsufficientAvailableBalance(asset, needed, available);
+                }
+
+                // Transfer any idle first
+                if (idle > 0) {
+                    SafeERC20.safeTransfer(IERC20(asset), _receiver, idle);
+                    _deposits[asset] -= idle;
+                }
+
+                // Calculate shares needed for remaining amount
+                uint256 rate = IAccountantWithRateProviders(accountant).getRateInQuoteSafe(ERC20(asset));
+                uint8 decimals = IAccountantWithRateProviders(accountant).decimals();
+                uint256 sharesNeeded = Math.mulDiv(needed, 10 ** decimals, rate);
+
+                // Queue withdrawal from BoringVault (Type A)
+                this.withdrawFromVault(asset, sharesNeeded, 0); // 0 = use default deadline
+
+                // Reduce deposits optimistically (will be restored if cancelled)
+                _deposits[asset] -= needed;
+            }
+        }
+
+        emit Withdrawn(_assets, _amounts, _receiver, block.timestamp);
+    }
+
     // ============================================
     // Internal Helpers
     // ============================================
