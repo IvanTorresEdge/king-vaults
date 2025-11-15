@@ -500,8 +500,9 @@ contract BoringVault is KingVault {
         // Record share balance before deposit
         uint256 sharesBefore = IERC20(vault).balanceOf(address(this));
 
-        // Approve BoringVault to spend assets (NOT Teller)
-        IERC20(_asset).approve(vault, _amount);
+        // SECURITY FIX (Slither): Use SafeERC20.forceApprove() instead of approve()
+        // Handles non-standard ERC20 tokens and prevents approval race conditions
+        SafeERC20.forceApprove(IERC20(_asset), vault, _amount);
 
         // Execute atomic deposit via Teller
         shares = ITellerWithMultiAssetSupport(teller).deposit(ERC20(_asset), _amount, minShares);
@@ -572,29 +573,27 @@ contract BoringVault is KingVault {
             inSolve: false
         });
 
-        // Approve AtomicQueue to spend shares
-        IERC20(vault).approve(atomicQueue, _shareAmount);
-
-        // Queue withdrawal in AtomicQueue
-        IAtomicQueue(atomicQueue).updateAtomicRequest(
-            ERC20(vault), // offer: BoringVault shares
-            ERC20(_asset), // want: Asset we expect to receive
-            request
-        );
-
-        // Store withdrawal request details
+        // SECURITY FIX (Slither): Apply CEI pattern - Effects before Interactions
+        // Update state BEFORE external calls to prevent reentrancy
         _withdrawalRequests[_asset] = WithdrawalRequest({
             asset: _asset,
             offer: expectedAmount, // IN-TRANSIT ASSET TRACKING
             want: _shareAmount,
             deadline: deadline
         });
-
-        // Update pending shares
         _pendingShares += _shareAmount;
-
-        // DUAL TRACKING: Increment queued withdraw (Type A tracking)
         _queuedWithdraw[_asset] += expectedAmount;
+
+        // SECURITY FIX (Slither): Use SafeERC20.forceApprove() instead of approve()
+        // Handles non-standard ERC20 tokens and prevents approval race conditions
+        SafeERC20.forceApprove(IERC20(vault), atomicQueue, _shareAmount);
+
+        // Queue withdrawal in AtomicQueue (EXTERNAL CALL)
+        IAtomicQueue(atomicQueue).updateAtomicRequest(
+            ERC20(vault), // offer: BoringVault shares
+            ERC20(_asset), // want: Asset we expect to receive
+            request
+        );
 
         emit WithdrawalQueued(_asset, _shareAmount, expectedAmount, deadline);
     }
@@ -675,24 +674,19 @@ contract BoringVault is KingVault {
         IAtomicQueue.AtomicRequest memory emptyRequest =
             IAtomicQueue.AtomicRequest({deadline: 0, atomicPrice: 0, offerAmount: 0, inSolve: false});
 
-        // Cancel withdrawal in AtomicQueue
+        // SECURITY FIX (Slither): Apply CEI pattern - Effects before Interactions
+        // Update state BEFORE external call to prevent reentrancy
+        _deposits[_asset] += queuedAmount;
+        _queuedWithdraw[_asset] -= queuedAmount;
+        delete _withdrawalRequests[_asset];
+        _pendingShares = 0;
+
+        // Cancel withdrawal in AtomicQueue (EXTERNAL CALL)
         IAtomicQueue(atomicQueue).updateAtomicRequest(
             ERC20(vault), // offer: BoringVault shares
             ERC20(_asset), // want: Asset
             emptyRequest
         );
-
-        // CRITICAL: Restore principal deposits (was reduced optimistically)
-        _deposits[_asset] += queuedAmount;
-
-        // DUAL TRACKING: Decrement queued withdraw (clear Type A tracking)
-        _queuedWithdraw[_asset] -= queuedAmount;
-
-        // Delete withdrawal request
-        delete _withdrawalRequests[_asset];
-
-        // Reset pending shares
-        _pendingShares = 0;
 
         emit WithdrawFromVaultCancelled(_asset, queuedAmount, block.timestamp);
     }
@@ -756,9 +750,11 @@ contract BoringVault is KingVault {
             uint256 idle = IERC20(asset).balanceOf(address(this));
 
             if (idle >= amount) {
-                // Sufficient idle balance, transfer directly
-                SafeERC20.safeTransfer(IERC20(asset), _receiver, amount);
+                // SECURITY FIX (Slither): Apply CEI pattern - Effects before Interactions
+                // Update state BEFORE external call to prevent reentrancy
                 _deposits[asset] -= amount;
+                // Sufficient idle balance, transfer directly (EXTERNAL CALL)
+                SafeERC20.safeTransfer(IERC20(asset), _receiver, amount);
             } else {
                 // Need to withdraw from BoringVault
                 uint256 needed = amount - idle;
@@ -769,10 +765,13 @@ contract BoringVault is KingVault {
                     revert InsufficientAvailableBalance(asset, needed, available);
                 }
 
+                // SECURITY FIX (Slither): Apply CEI pattern - Effects before Interactions
+                // Update state BEFORE external calls to prevent reentrancy
+
                 // Transfer any idle first
                 if (idle > 0) {
-                    SafeERC20.safeTransfer(IERC20(asset), _receiver, idle);
                     _deposits[asset] -= idle;
+                    SafeERC20.safeTransfer(IERC20(asset), _receiver, idle); // EXTERNAL CALL
                 }
 
                 // Calculate shares needed for remaining amount
@@ -780,11 +779,11 @@ contract BoringVault is KingVault {
                 uint8 decimals = IAccountantWithRateProviders(accountant).decimals();
                 uint256 sharesNeeded = Math.mulDiv(needed, 10 ** decimals, rate);
 
-                // Queue withdrawal from BoringVault (Type A)
-                this.withdrawFromVault(asset, sharesNeeded, 0); // 0 = use default deadline
-
-                // Reduce deposits optimistically (will be restored if cancelled)
+                // Reduce deposits optimistically BEFORE external call (will be restored if cancelled)
                 _deposits[asset] -= needed;
+
+                // Queue withdrawal from BoringVault (Type A) - EXTERNAL CALL
+                this.withdrawFromVault(asset, sharesNeeded, 0); // 0 = use default deadline
             }
         }
 
@@ -1086,8 +1085,9 @@ contract BoringVault is KingVault {
             inSolve: false
         });
 
-        // Approve AtomicQueue to spend shares
-        IERC20(vault).approve(atomicQueue, _shareAmount);
+        // SECURITY FIX (Slither): Use SafeERC20.forceApprove() instead of approve()
+        // Handles non-standard ERC20 tokens and prevents approval race conditions
+        SafeERC20.forceApprove(IERC20(vault), atomicQueue, _shareAmount);
 
         // Queue withdrawal in AtomicQueue
         IAtomicQueue(atomicQueue).updateAtomicRequest(
@@ -1287,21 +1287,18 @@ contract BoringVault is KingVault {
         IAtomicQueue.AtomicRequest memory emptyRequest =
             IAtomicQueue.AtomicRequest({deadline: 0, atomicPrice: 0, offerAmount: 0, inSolve: false});
 
-        // 4. Cancel withdrawal in AtomicQueue
+        // 4. SECURITY FIX (Slither): Apply CEI pattern - Effects before Interactions
+        // Update state BEFORE external call to prevent reentrancy
+        _queuedProfits[_asset] -= queuedAmount;
+        delete _withdrawalRequests[_asset];
+        _pendingShares = 0;
+
+        // 5. Cancel withdrawal in AtomicQueue (EXTERNAL CALL)
         IAtomicQueue(atomicQueue).updateAtomicRequest(
             ERC20(vault), // offer: BoringVault shares
             ERC20(_asset), // want: Asset
             emptyRequest
         );
-
-        // 5. DUAL TRACKING: Decrement queued profits (clear Type B tracking)
-        _queuedProfits[_asset] -= queuedAmount;
-
-        // 6. Delete withdrawal request
-        delete _withdrawalRequests[_asset];
-
-        // 7. Reset pending shares
-        _pendingShares = 0;
 
         // CRITICAL: Does NOT modify _deposits (profit was never principal)
         // Shares automatically restored (no internal tracking, use balanceOf())
