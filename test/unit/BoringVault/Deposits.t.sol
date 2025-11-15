@@ -686,9 +686,9 @@ contract DepositsTest is Test {
         }
     }
 
-    function test_getBalances_EmptyWhenNoDeposits() public {
+    function test_getBalances_EmptyWhenNoDeposits() public view {
         // No deposits yet
-        (address[] memory assets, uint256[] memory balances) = boringVault.getBalances();
+        (, uint256[] memory balances) = boringVault.getBalances();
 
         // All balances should be 0
         for (uint256 i = 0; i < balances.length; i++) {
@@ -722,7 +722,7 @@ contract DepositsTest is Test {
         assertEq(balance, 0, "Should return 0 for unregistered asset");
     }
 
-    function test_getBalance_ReturnsZeroForNoDeposits() public {
+    function test_getBalance_ReturnsZeroForNoDeposits() public view {
         uint256 balance = boringVault.getBalance(address(weth));
         assertEq(balance, 0, "Should return 0 when no deposits");
     }
@@ -757,7 +757,7 @@ contract DepositsTest is Test {
     // Slippage Validation Tests
     // ============================================
 
-    function test_slippage_DefaultSlippageIs50BPS() public {
+    function test_slippage_DefaultSlippageIs50BPS() public view {
         assertEq(boringVault.maxSlippageBPS(), 50, "Default slippage should be 50 BPS (0.5%)");
     }
 

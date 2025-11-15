@@ -134,8 +134,8 @@ contract KingVaultSetProfitsDistributionTest is Test {
         vault.setProfitsDistribution(updated, updatedPercent);
 
         // Assert updated values
-        (bool isTreasury, uint256 treasuryPct) = vault.getProfitRecipientInfo(treasury);
-        (bool isDev, uint256 devPct) = vault.getProfitRecipientInfo(devFund);
+        (, uint256 treasuryPct) = vault.getProfitRecipientInfo(treasury);
+        (, uint256 devPct) = vault.getProfitRecipientInfo(devFund);
 
         assertEq(treasuryPct, 7000, "Treasury should be updated to 70%");
         assertEq(devPct, 3000, "DevFund should be 30%");

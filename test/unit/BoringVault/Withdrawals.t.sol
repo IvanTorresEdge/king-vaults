@@ -304,7 +304,7 @@ contract WithdrawalsTest is Test {
     function test_withdrawFromVault_CreatesWithdrawalRequest() public {
         // Setup: deposit and deploy to vault
         _depositAssets(address(weth), 1000e18);
-        uint256 shares = _deployToVault(address(weth), 1000e18);
+        _deployToVault(address(weth), 1000e18);
 
         // Create withdrawal request for 500 shares
         uint256 sharesToWithdraw = 500e18;
@@ -348,7 +348,6 @@ contract WithdrawalsTest is Test {
 
         // Create withdrawal request
         uint256 sharesToWithdraw = 500e18;
-        uint256 expectedAmount = Math.mulDiv(sharesToWithdraw, 1.0e18, 1e18);
 
         vm.prank(owner);
         boringVault.withdrawFromVault(address(weth), sharesToWithdraw, 0);
@@ -865,7 +864,7 @@ contract WithdrawalsTest is Test {
     // _pendingShares Tracking Tests
     // ============================================
 
-    function test_pendingShares_InitiallyZero() public {
+    function test_pendingShares_InitiallyZero() public view {
         assertEq(boringVault.getPendingShares(), 0, "Pending shares should start at 0");
     }
 

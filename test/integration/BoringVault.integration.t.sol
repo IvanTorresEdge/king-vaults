@@ -667,7 +667,7 @@ contract BoringVaultIntegrationTest is Test {
 
         // Step 1: Deposit to original implementation
         _depositFromKingVault(address(weth), depositAmount);
-        uint256 shares = _deployToVault(address(weth), depositAmount);
+        _deployToVault(address(weth), depositAmount);
 
         // Record state before upgrade
         uint256 balanceBefore = boringVault.getBalance(address(weth));

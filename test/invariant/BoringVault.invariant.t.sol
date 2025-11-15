@@ -486,8 +486,6 @@ contract BoringVaultInvariantTest is Test {
             }
 
             // If balance >= deposits, profit is well-defined
-            uint256 profit = balance - deposits;
-
             // This invariant is informational - we expect profit to be
             // distributable without affecting principal
             assertTrue(

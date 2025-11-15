@@ -204,7 +204,7 @@ contract ProfitsTest is Test {
     // calculateProfit() Tests - Basic Scenarios
     // ============================================
 
-    function test_calculateProfit_ReturnsZeroWithNoShares() public {
+    function test_calculateProfit_ReturnsZeroWithNoShares() public view {
         uint256 profit = boringVault.calculateProfit();
         assertEq(profit, 0, "Profit should be 0 with no shares");
     }
