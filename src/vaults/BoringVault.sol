@@ -210,6 +210,60 @@ contract BoringVault is KingVault {
      */
     error SlippageExceedsLimit(uint16 requested, uint16 maximum);
 
+    /**
+     * @notice Thrown when exchange rate is zero or invalid
+     * @dev Indicates Accountant is returning invalid rate data
+     */
+    error InvalidRate();
+
+    /**
+     * @notice Thrown when atomic price exceeds uint88 maximum
+     * @dev AtomicQueue requires prices to fit in uint88
+     */
+    error AtomicPriceOverflow();
+
+    /**
+     * @notice Thrown when asset price in ETH is zero or invalid
+     * @dev Indicates PriceProvider is returning invalid price data
+     */
+    error InvalidPrice();
+
+    /**
+     * @notice Thrown when attempting to harvest profits with no profit available
+     * @dev Indicates share value has not appreciated since last harvest
+     */
+    error NoProfitToHarvest();
+
+    /**
+     * @notice Thrown when share value calculation returns zero
+     * @dev Indicates Accountant is returning zero rate
+     */
+    error NoShareValue();
+
+    /**
+     * @notice Thrown when vault has no shares but profit harvest is attempted
+     * @dev Should never happen in normal flow as deposits create shares
+     */
+    error NoShares();
+
+    /**
+     * @notice Thrown when profit share calculation returns zero
+     * @dev Indicates no actual profit despite profitInEth being positive
+     */
+    error NoProfitShares();
+
+    /**
+     * @notice Thrown when calculated profit shares exceed current vault shares
+     * @dev This indicates a serious calculation error and prevents over-withdrawal
+     */
+    error InvalidProfitCalculation();
+
+    /**
+     * @notice Thrown when base asset address is zero
+     * @dev Base asset must be configured before harvesting profits
+     */
+    error InvalidBaseAsset();
+
     // ============================================
     // Events
     // ============================================
@@ -755,7 +809,7 @@ contract BoringVault is KingVault {
     function _calculateExpectedShares(address _asset, uint256 _amount) internal view returns (uint256 expectedShares) {
         // Query current exchange rate for this asset
         uint256 rate = IAccountantWithRateProviders(accountant).getRateInQuoteSafe(ERC20(_asset));
-        require(rate > 0, "Invalid rate");
+        if (rate == 0) revert InvalidRate();
 
         // Get decimals for rate (typically 18)
         uint8 decimals = IAccountantWithRateProviders(accountant).decimals();
@@ -782,7 +836,7 @@ contract BoringVault is KingVault {
 
         // Query current exchange rate
         uint256 rate = IAccountantWithRateProviders(accountant).getRate();
-        require(rate > 0, "Invalid rate");
+        if (rate == 0) revert InvalidRate();
 
         // Get decimals for rate
         uint8 decimals = IAccountantWithRateProviders(accountant).decimals();
@@ -810,7 +864,7 @@ contract BoringVault is KingVault {
     {
         // Query current exchange rate for this asset
         uint256 rate = IAccountantWithRateProviders(accountant).getRateInQuoteSafe(ERC20(_asset));
-        require(rate > 0, "Invalid rate");
+        if (rate == 0) revert InvalidRate();
 
         // Get decimals for rate
         uint8 decimals = IAccountantWithRateProviders(accountant).decimals();
@@ -848,7 +902,7 @@ contract BoringVault is KingVault {
         atomicPrice = Math.mulDiv(minAmount, 10 ** decimals, _shareAmount);
 
         // Ensure result fits in uint88 (AtomicRequest struct limitation)
-        require(atomicPrice <= type(uint88).max, "Atomic price overflow");
+        if (atomicPrice > type(uint88).max) revert AtomicPriceOverflow();
     }
 
     // ============================================
@@ -898,7 +952,7 @@ contract BoringVault is KingVault {
 
             // Get asset price in ETH
             uint256 priceInEth = provider.getPriceInEth(asset);
-            require(priceInEth > 0, "Invalid price");
+            if (priceInEth == 0) revert InvalidPrice();
 
             // Get asset decimals
             uint8 decimals = IERC20Metadata(asset).decimals();
@@ -958,27 +1012,27 @@ contract BoringVault is KingVault {
     function harvestProfits() external override onlyOwner whenNotPaused {
         // 1. Calculate current profit
         uint256 profitInEth = calculateProfit();
-        require(profitInEth > 0, "No profit to harvest");
+        if (profitInEth == 0) revert NoProfitToHarvest();
 
         // 2. Get current share value
         uint256 shareValue = _calculateVaultShareValue();
-        require(shareValue > 0, "No share value");
+        if (shareValue == 0) revert NoShareValue();
 
         // 3. Get current share balance
         uint256 currentShares = IERC20(vault).balanceOf(address(this));
-        require(currentShares > 0, "No shares");
+        if (currentShares == 0) revert NoShares();
 
         // 4. Calculate profit shares
         // profitShares = currentShares × profitInEth / shareValue
         uint256 profitShares = Math.mulDiv(currentShares, profitInEth, shareValue);
 
         // 5. Validate profit shares
-        require(profitShares > 0, "No profit shares");
-        require(profitShares <= currentShares, "Invalid profit calculation");
+        if (profitShares == 0) revert NoProfitShares();
+        if (profitShares > currentShares) revert InvalidProfitCalculation();
 
         // 6. Get base asset from Accountant
         address baseAsset = IAccountantWithRateProviders(accountant).base();
-        require(baseAsset != address(0), "Invalid base asset");
+        if (baseAsset == address(0)) revert InvalidBaseAsset();
 
         // 7. Check no pending withdrawal for base asset
         if (_withdrawalRequests[baseAsset].deadline > 0) {

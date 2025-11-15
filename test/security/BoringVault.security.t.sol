@@ -654,7 +654,7 @@ contract BoringVaultSecurityTest is Test {
 
         // Attempt to harvest when no profit
         vm.prank(owner);
-        vm.expectRevert("No profit to harvest");
+        vm.expectRevert(BoringVault.NoProfitToHarvest.selector);
         boringVault.harvestProfits();
     }
 
