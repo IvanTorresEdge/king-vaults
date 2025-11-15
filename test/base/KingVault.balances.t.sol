@@ -15,9 +15,9 @@ contract KingVaultBalancesTest is Test {
     KingVaultHarness public vault;
     KingVaultHarness public implementation;
 
-    MockERC20 public token1;  // 18 decimals
-    MockERC20 public token2;  // 18 decimals
-    MockERC20 public token3;  // 6 decimals
+    MockERC20 public token1; // 18 decimals
+    MockERC20 public token2; // 18 decimals
+    MockERC20 public token3; // 6 decimals
 
     address public owner = address(0x1);
     address public kingVault = address(0x2);
@@ -28,12 +28,8 @@ contract KingVaultBalancesTest is Test {
         implementation = new KingVaultHarness();
 
         // Deploy proxy
-        bytes memory initData = abi.encodeWithSelector(
-            KingVaultHarness.initialize.selector,
-            owner,
-            kingVault,
-            priceProvider
-        );
+        bytes memory initData =
+            abi.encodeWithSelector(KingVaultHarness.initialize.selector, owner, kingVault, priceProvider);
         ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initData);
         vault = KingVaultHarness(address(proxy));
 

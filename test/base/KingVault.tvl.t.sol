@@ -32,19 +32,15 @@ contract KingVaultTVLTest is Test {
 
         // Set prices
         priceProvider.setPrice(address(usdc), 0.0005e18); // $1 = 0.0005 ETH
-        priceProvider.setPrice(address(weth), 1e18);      // 1 WETH = 1 ETH
-        priceProvider.setPrice(address(dai), 0.0005e18);  // $1 = 0.0005 ETH
+        priceProvider.setPrice(address(weth), 1e18); // 1 WETH = 1 ETH
+        priceProvider.setPrice(address(dai), 0.0005e18); // $1 = 0.0005 ETH
 
         // Deploy vault implementation
         KingVaultHarness implementation = new KingVaultHarness();
 
         // Deploy proxy
-        bytes memory initData = abi.encodeWithSelector(
-            KingVaultHarness.initialize.selector,
-            owner,
-            kingVault,
-            address(priceProvider)
-        );
+        bytes memory initData =
+            abi.encodeWithSelector(KingVaultHarness.initialize.selector, owner, kingVault, address(priceProvider));
         ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initData);
         vault = KingVaultHarness(address(proxy));
 
@@ -94,9 +90,9 @@ contract KingVaultTVLTest is Test {
 
     function test_TVL_MultipleTokens() public {
         // Deposit tokens
-        usdc.mint(kingVault, 1000e6);     // $1000
-        weth.mint(kingVault, 2e18);       // 2 ETH = $4000
-        dai.mint(kingVault, 500e18);      // $500
+        usdc.mint(kingVault, 1000e6); // $1000
+        weth.mint(kingVault, 2e18); // 2 ETH = $4000
+        dai.mint(kingVault, 500e18); // $500
 
         vm.prank(kingVault);
         usdc.approve(address(vault), 1000e6);
@@ -196,9 +192,7 @@ contract KingVaultTVLTest is Test {
         priceProvider.setPriceAvailability(address(usdc), false);
 
         // TVL should revert, not skip
-        vm.expectRevert(
-            abi.encodeWithSignature("PriceNotAvailable(address)", address(usdc))
-        );
+        vm.expectRevert(abi.encodeWithSignature("PriceNotAvailable(address)", address(usdc)));
         vault.tvl();
     }
 
@@ -220,9 +214,7 @@ contract KingVaultTVLTest is Test {
         priceProvider.setPrice(address(usdc), 0);
 
         // TVL should revert, not skip
-        vm.expectRevert(
-            abi.encodeWithSignature("PriceNotAvailable(address)", address(usdc))
-        );
+        vm.expectRevert(abi.encodeWithSignature("PriceNotAvailable(address)", address(usdc)));
         vault.tvl();
     }
 
@@ -255,9 +247,7 @@ contract KingVaultTVLTest is Test {
         priceProvider.setPriceAvailability(address(weth), false);
 
         // TVL should revert for the entire calculation
-        vm.expectRevert(
-            abi.encodeWithSignature("PriceNotAvailable(address)", address(weth))
-        );
+        vm.expectRevert(abi.encodeWithSignature("PriceNotAvailable(address)", address(weth)));
         vault.tvl();
     }
 
@@ -279,9 +269,7 @@ contract KingVaultTVLTest is Test {
         priceProvider.setPriceAvailability(address(usdc), false);
 
         // Verify reverts
-        vm.expectRevert(
-            abi.encodeWithSignature("PriceNotAvailable(address)", address(usdc))
-        );
+        vm.expectRevert(abi.encodeWithSignature("PriceNotAvailable(address)", address(usdc)));
         vault.tvl();
 
         // Restore price
@@ -299,8 +287,8 @@ contract KingVaultTVLTest is Test {
 
     function test_TVL_DifferentDecimals() public {
         // Deposit tokens with different decimals
-        usdc.mint(kingVault, 1000e6);   // 6 decimals
-        weth.mint(kingVault, 2e18);     // 18 decimals
+        usdc.mint(kingVault, 1000e6); // 6 decimals
+        weth.mint(kingVault, 2e18); // 18 decimals
 
         vm.prank(kingVault);
         usdc.approve(address(vault), 1000e6);

@@ -35,12 +35,8 @@ contract KingVaultRegisterAssetsTest is Test {
         KingVaultHarness implementation = new KingVaultHarness();
 
         // Deploy proxy
-        bytes memory initData = abi.encodeWithSelector(
-            KingVaultHarness.initialize.selector,
-            owner,
-            kingVault,
-            address(priceProvider)
-        );
+        bytes memory initData =
+            abi.encodeWithSelector(KingVaultHarness.initialize.selector, owner, kingVault, address(priceProvider));
         ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initData);
         vault = KingVaultHarness(address(proxy));
     }
@@ -78,11 +74,7 @@ contract KingVaultRegisterAssetsTest is Test {
         accepted[0] = false;
 
         vm.expectRevert(
-            abi.encodeWithSignature(
-                "CannotDisableAssetWithDeposits(address,uint256)",
-                address(usdc),
-                1000e6
-            )
+            abi.encodeWithSignature("CannotDisableAssetWithDeposits(address,uint256)", address(usdc), 1000e6)
         );
         vault.registerAssets(tokens, accepted);
 
@@ -176,11 +168,7 @@ contract KingVaultRegisterAssetsTest is Test {
 
         // Should revert because USDC has deposits
         vm.expectRevert(
-            abi.encodeWithSignature(
-                "CannotDisableAssetWithDeposits(address,uint256)",
-                address(usdc),
-                1000e6
-            )
+            abi.encodeWithSignature("CannotDisableAssetWithDeposits(address,uint256)", address(usdc), 1000e6)
         );
         vault.registerAssets(tokens, accepted);
 

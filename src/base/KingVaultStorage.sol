@@ -14,12 +14,7 @@ import {IKingVault} from "../interfaces/IKingVault.sol";
  * @dev Provides base storage structure for all vault types with UUPS upgradeability
  * @dev Uses simplified storage with separate mappings for gas efficiency (Decision 12 & 13)
  */
-abstract contract KingVaultStorage is
-    Initializable,
-    Ownable2StepUpgradeable,
-    PausableUpgradeable,
-    UUPSUpgradeable
-{
+abstract contract KingVaultStorage is Initializable, Ownable2StepUpgradeable, PausableUpgradeable, UUPSUpgradeable {
     // ============================================
     // State Variables
     // ============================================

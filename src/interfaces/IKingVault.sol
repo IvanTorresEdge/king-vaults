@@ -49,12 +49,7 @@ interface IKingVault {
      * @param amounts 2D array of amounts distributed [recipient][asset]
      * @param timestamp Block timestamp of distribution
      */
-    event ProfitsDistributed(
-        address[] recipients,
-        address[] assets,
-        uint256[][] amounts,
-        uint256 timestamp
-    );
+    event ProfitsDistributed(address[] recipients, address[] assets, uint256[][] amounts, uint256 timestamp);
 
     /**
      * @notice Emitted when profit distribution percentages are updated
@@ -184,11 +179,7 @@ interface IKingVault {
      * @param _amounts Array of amounts to withdraw (must match assets length)
      * @param _receiver Address to receive the withdrawn assets
      */
-    function withdraw(
-        address[] memory _tokens,
-        uint256[] memory _amounts,
-        address _receiver
-    ) external;
+    function withdraw(address[] memory _tokens, uint256[] memory _amounts, address _receiver) external;
 
     /**
      * @notice Emergency withdrawal of all idle assets
@@ -234,10 +225,7 @@ interface IKingVault {
      * @param _recipients Array of recipient addresses to update
      * @param _percentsBPS Array of percentages in basis points (10000 = 100%)
      */
-    function setProfitsDistribution(
-        address[] memory _recipients,
-        uint16[] memory _percentsBPS
-    ) external;
+    function setProfitsDistribution(address[] memory _recipients, uint16[] memory _percentsBPS) external;
 
     /**
      * @notice Distribute profits to configured recipients

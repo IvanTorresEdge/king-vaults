@@ -231,12 +231,7 @@ contract BoringVault is KingVault {
      * @param expectedAmount Asset amount expected from solver
      * @param deadline Unix timestamp after which request expires
      */
-    event WithdrawalQueued(
-        address indexed asset,
-        uint256 shareAmount,
-        uint256 expectedAmount,
-        uint64 deadline
-    );
+    event WithdrawalQueued(address indexed asset, uint256 shareAmount, uint256 expectedAmount, uint64 deadline);
 
     /**
      * @notice Emitted when withdrawal is fulfilled by solver
@@ -271,10 +266,7 @@ contract BoringVault is KingVault {
      * @param timestamp Block timestamp of completion
      */
     event PrincipalWithdrawCompleted(
-        address indexed asset,
-        uint256 amount,
-        address indexed receiver,
-        uint256 timestamp
+        address indexed asset, uint256 amount, address indexed receiver, uint256 timestamp
     );
 
     /**
@@ -431,10 +423,12 @@ contract BoringVault is KingVault {
      * // _deposits[ETHFI] unchanged (managed by King main vault)
      * ```
      */
-    function depositToVault(
-        address _asset,
-        uint256 _amount
-    ) external onlyOwner whenNotPaused returns (uint256 shares) {
+    function depositToVault(address _asset, uint256 _amount)
+        external
+        onlyOwner
+        whenNotPaused
+        returns (uint256 shares)
+    {
         // Validate inputs
         if (!_registeredTokens[_asset]) revert AssetNotAccepted(_asset);
         if (_amount == 0) revert ZeroAmount();
@@ -456,11 +450,7 @@ contract BoringVault is KingVault {
         IERC20(_asset).approve(vault, _amount);
 
         // Execute atomic deposit via Teller
-        shares = ITellerWithMultiAssetSupport(teller).deposit(
-            ERC20(_asset),
-            _amount,
-            minShares
-        );
+        shares = ITellerWithMultiAssetSupport(teller).deposit(ERC20(_asset), _amount, minShares);
 
         // Verify shares received
         uint256 sharesAfter = IERC20(vault).balanceOf(address(this));
@@ -489,11 +479,11 @@ contract BoringVault is KingVault {
      * @param _shareAmount BoringVault shares to withdraw
      * @param _deadline Unix timestamp for request expiration (0 = use default withdrawalDuration)
      */
-    function withdrawFromVault(
-        address _asset,
-        uint256 _shareAmount,
-        uint64 _deadline
-    ) external onlyOwner whenNotPaused {
+    function withdrawFromVault(address _asset, uint256 _shareAmount, uint64 _deadline)
+        external
+        onlyOwner
+        whenNotPaused
+    {
         // Validate inputs
         if (_shareAmount == 0) revert ZeroAmount();
         if (!_registeredTokens[_asset]) revert AssetNotAccepted(_asset);
@@ -565,11 +555,11 @@ contract BoringVault is KingVault {
      * @param _amount Asset amount to transfer to receiver
      * @param _receiver Address to receive assets (typically King main vault)
      */
-    function completePrincipalWithdraw(
-        address _asset,
-        uint256 _amount,
-        address _receiver
-    ) external onlyOwner whenNotPaused {
+    function completePrincipalWithdraw(address _asset, uint256 _amount, address _receiver)
+        external
+        onlyOwner
+        whenNotPaused
+    {
         // Validate withdrawal request exists
         WithdrawalRequest memory request = _withdrawalRequests[_asset];
         if (request.deadline == 0) {
@@ -689,10 +679,7 @@ contract BoringVault is KingVault {
      * @param _amounts Token amounts to withdraw (parallel arrays)
      * @param _receiver Address to receive withdrawn assets (King main vault)
      */
-    function withdraw(address[] memory _assets, uint256[] memory _amounts, address _receiver)
-        external
-        override
-    {
+    function withdraw(address[] memory _assets, uint256[] memory _amounts, address _receiver) external override {
         // Access control: only kingVault can call
         _requireKingVault();
 
@@ -765,10 +752,7 @@ contract BoringVault is KingVault {
      * @custom:formula shares = amount × (10^decimals / rate)
      * @custom:example 1000 ETHFI @ rate 2.0 → 500 shares (assuming 18 decimals)
      */
-    function _calculateExpectedShares(
-        address _asset,
-        uint256 _amount
-    ) internal view returns (uint256 expectedShares) {
+    function _calculateExpectedShares(address _asset, uint256 _amount) internal view returns (uint256 expectedShares) {
         // Query current exchange rate for this asset
         uint256 rate = IAccountantWithRateProviders(accountant).getRateInQuoteSafe(ERC20(_asset));
         require(rate > 0, "Invalid rate");
@@ -819,10 +803,11 @@ contract BoringVault is KingVault {
      * @custom:formula assets = shares × rate / (10^decimals)
      * @custom:example 100 shares @ rate 2.4 → 240 WETH
      */
-    function _calculateExpectedAssets(
-        address _asset,
-        uint256 _shareAmount
-    ) internal view returns (uint256 expectedAmount) {
+    function _calculateExpectedAssets(address _asset, uint256 _shareAmount)
+        internal
+        view
+        returns (uint256 expectedAmount)
+    {
         // Query current exchange rate for this asset
         uint256 rate = IAccountantWithRateProviders(accountant).getRateInQuoteSafe(ERC20(_asset));
         require(rate > 0, "Invalid rate");
@@ -1029,11 +1014,7 @@ contract BoringVault is KingVault {
      * @custom:security No access control needed (internal function)
      * @custom:security Assumes validation done by caller (harvestProfits)
      */
-    function _queueProfitWithdrawal(
-        address _asset,
-        uint256 _shareAmount,
-        uint64 _deadline
-    ) internal {
+    function _queueProfitWithdrawal(address _asset, uint256 _shareAmount, uint64 _deadline) internal {
         // Calculate deadline (use default if not provided)
         uint64 deadline = _deadline == 0 ? uint64(block.timestamp) + withdrawalDuration : _deadline;
 

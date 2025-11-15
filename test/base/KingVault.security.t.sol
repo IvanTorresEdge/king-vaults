@@ -47,9 +47,8 @@ contract KingVaultSecurityTest is Test {
 
         // Deploy vault
         KingVaultHarness implementation = new KingVaultHarness();
-        bytes memory initData = abi.encodeWithSelector(
-            KingVaultHarness.initialize.selector, owner, kingVault, address(priceProvider)
-        );
+        bytes memory initData =
+            abi.encodeWithSelector(KingVaultHarness.initialize.selector, owner, kingVault, address(priceProvider));
 
         ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initData);
         vault = KingVaultHarness(address(proxy));

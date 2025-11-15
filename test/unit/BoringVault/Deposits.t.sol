@@ -87,8 +87,8 @@ contract DepositsTest is Test {
         // Deploy BoringVault implementation (with immutable addresses)
         implementation = new BoringVault(
             address(vaultToken), // vault
-            address(teller),     // teller
-            address(accountant)  // accountant
+            address(teller), // teller
+            address(accountant) // accountant
         );
 
         // Deploy and initialize proxy
@@ -111,13 +111,7 @@ contract DepositsTest is Test {
         bool[] memory _accepted
     ) internal returns (BoringVault) {
         bytes memory initData = abi.encodeWithSelector(
-            BoringVault.initialize.selector,
-            _owner,
-            _kingVault,
-            _priceProvider,
-            _atomicQueue,
-            _tokens,
-            _accepted
+            BoringVault.initialize.selector, _owner, _kingVault, _priceProvider, _atomicQueue, _tokens, _accepted
         );
         ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initData);
         return BoringVault(address(proxy));
@@ -136,14 +130,7 @@ contract DepositsTest is Test {
         accepted[1] = true;
         accepted[2] = true;
 
-        return _deployBoringVault(
-            owner,
-            kingVault,
-            address(priceProvider),
-            address(atomicQueue),
-            tokens,
-            accepted
-        );
+        return _deployBoringVault(owner, kingVault, address(priceProvider), address(atomicQueue), tokens, accepted);
     }
 
     /**
@@ -1029,11 +1016,10 @@ contract MockTeller {
         accountant = _accountant;
     }
 
-    function deposit(
-        MockERC20 depositAsset,
-        uint256 depositAmount,
-        uint256 minimumMint
-    ) external returns (uint256 shares) {
+    function deposit(MockERC20 depositAsset, uint256 depositAmount, uint256 minimumMint)
+        external
+        returns (uint256 shares)
+    {
         require(!paused, "Teller paused");
 
         // NOTE: In real Veda Teller:
@@ -1146,19 +1132,15 @@ contract MockAtomicQueue {
 
     mapping(address => mapping(address => mapping(address => AtomicRequest))) public requests;
 
-    function updateAtomicRequest(
-        MockERC20 offer,
-        MockERC20 want,
-        AtomicRequest calldata request
-    ) external {
+    function updateAtomicRequest(MockERC20 offer, MockERC20 want, AtomicRequest calldata request) external {
         requests[msg.sender][address(offer)][address(want)] = request;
     }
 
-    function getUserAtomicRequest(
-        address user,
-        MockERC20 offer,
-        MockERC20 want
-    ) external view returns (AtomicRequest memory) {
+    function getUserAtomicRequest(address user, MockERC20 offer, MockERC20 want)
+        external
+        view
+        returns (AtomicRequest memory)
+    {
         return requests[user][address(offer)][address(want)];
     }
 }

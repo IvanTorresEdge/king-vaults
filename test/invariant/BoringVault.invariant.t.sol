@@ -85,11 +85,7 @@ contract BoringVaultInvariantTest is Test {
         accountant.setRate(1.0e18);
 
         // Deploy BoringVault implementation
-        implementation = new BoringVault(
-            address(vaultToken),
-            address(teller),
-            address(accountant)
-        );
+        implementation = new BoringVault(address(vaultToken), address(teller), address(accountant));
 
         // Deploy and initialize proxy
         address[] memory tokens = new address[](3);
@@ -125,16 +121,7 @@ contract BoringVaultInvariantTest is Test {
         boringVault.setProfitsDistribution(recipients, percentsBPS);
 
         // Deploy handler
-        handler = new BoringVaultHandler(
-            boringVault,
-            weth,
-            ethfi,
-            usdc,
-            vaultToken,
-            accountant,
-            owner,
-            kingVault
-        );
+        handler = new BoringVaultHandler(boringVault, weth, ethfi, usdc, vaultToken, accountant, owner, kingVault);
 
         // Target handler for invariant testing
         targetContract(address(handler));
@@ -188,7 +175,8 @@ contract BoringVaultInvariantTest is Test {
             address asset = assets[i];
             uint256 deposits = boringVault.getBalance(asset);
 
-            if (deposits > 0 && deposits < type(uint128).max) { // Skip extreme values
+            if (deposits > 0 && deposits < type(uint128).max) {
+                // Skip extreme values
                 uint256 priceInEth = priceProvider.getPriceInEth(asset);
                 if (priceInEth == 0 || priceInEth > type(uint128).max) continue; // Skip invalid prices
 
@@ -213,7 +201,8 @@ contract BoringVaultInvariantTest is Test {
             address asset = assets[i];
             uint256 idle = MockERC20(asset).balanceOf(address(boringVault));
 
-            if (idle > 0 && idle < type(uint128).max) { // Skip extreme values
+            if (idle > 0 && idle < type(uint128).max) {
+                // Skip extreme values
                 uint256 priceInEth = priceProvider.getPriceInEth(asset);
                 if (priceInEth == 0 || priceInEth > type(uint128).max) continue;
 
@@ -290,25 +279,13 @@ contract BoringVaultInvariantTest is Test {
         }
 
         // INVARIANT: Only one withdrawal request at a time
-        assertLe(
-            activeRequestCount,
-            1,
-            "Should have at most one active withdrawal request"
-        );
+        assertLe(activeRequestCount, 1, "Should have at most one active withdrawal request");
 
         // INVARIANT: _pendingShares matches active request
         if (activeRequestCount == 0) {
-            assertEq(
-                totalPendingShares,
-                0,
-                "Pending shares should be 0 when no active requests"
-            );
+            assertEq(totalPendingShares, 0, "Pending shares should be 0 when no active requests");
         } else {
-            assertEq(
-                totalPendingShares,
-                activeRequestShares,
-                "Pending shares should match active request amount"
-            );
+            assertEq(totalPendingShares, activeRequestShares, "Pending shares should match active request amount");
         }
     }
 
@@ -351,21 +328,13 @@ contract BoringVaultInvariantTest is Test {
         // If calculateProfit() > 0, then shareValue must be > principal
         uint256 profit = boringVault.calculateProfit();
         if (profit > 0) {
-            assertGe(
-                shareValueInEth,
-                totalPrincipalInEth,
-                "Share value should be >= principal when profit > 0"
-            );
+            assertGe(shareValueInEth, totalPrincipalInEth, "Share value should be >= principal when profit > 0");
         }
 
         // calculateProfit() should never return value when at a loss
         // (it returns 0 when shareValue < principal)
         if (shareValueInEth < totalPrincipalInEth && shares > 0) {
-            assertEq(
-                profit,
-                0,
-                "Profit should be 0 when share value < principal"
-            );
+            assertEq(profit, 0, "Profit should be 0 when share value < principal");
         }
     }
 
@@ -396,14 +365,10 @@ contract BoringVaultInvariantTest is Test {
         }
 
         // Get actual TVL from contract
-        (uint256 actualTvlInEth, ) = boringVault.tvl();
+        (uint256 actualTvlInEth,) = boringVault.tvl();
 
         // INVARIANT: TVL should equal sum of principal deposits in ETH
-        assertEq(
-            actualTvlInEth,
-            expectedTvlInEth,
-            "TVL should equal principal deposits, not share value"
-        );
+        assertEq(actualTvlInEth, expectedTvlInEth, "TVL should equal principal deposits, not share value");
     }
 
     // ============================================
@@ -425,10 +390,7 @@ contract BoringVaultInvariantTest is Test {
             assertEq(
                 balances[i],
                 individualBalance,
-                string(abi.encodePacked(
-                    "getBalances() mismatch for asset ",
-                    _addressToString(assets[i])
-                ))
+                string(abi.encodePacked("getBalances() mismatch for asset ", _addressToString(assets[i])))
             );
         }
     }
@@ -447,21 +409,13 @@ contract BoringVaultInvariantTest is Test {
         uint256 pendingShares = boringVault.getPendingShares();
 
         // INVARIANT: Pending shares should never exceed total balance
-        assertLe(
-            pendingShares,
-            vaultBalance,
-            "Pending shares cannot exceed vault balance"
-        );
+        assertLe(pendingShares, vaultBalance, "Pending shares cannot exceed vault balance");
 
         // Available shares = total - pending
         uint256 availableShares = vaultBalance - pendingShares;
 
         // INVARIANT: Available + pending = total
-        assertEq(
-            availableShares + pendingShares,
-            vaultBalance,
-            "Available + pending should equal total vault balance"
-        );
+        assertEq(availableShares + pendingShares, vaultBalance, "Available + pending should equal total vault balance");
     }
 
     // ============================================
@@ -483,11 +437,7 @@ contract BoringVaultInvariantTest is Test {
                 // Active withdrawal request exists
 
                 // INVARIANT: Request shares should match pending shares
-                assertEq(
-                    request.want,
-                    boringVault.getPendingShares(),
-                    "Request shares should match pending shares"
-                );
+                assertEq(request.want, boringVault.getPendingShares(), "Request shares should match pending shares");
 
                 // INVARIANT: Expected amount should be reasonable based on original rate
                 // Note: Rate may have changed since request was created, so allow larger tolerance
@@ -500,18 +450,11 @@ contract BoringVaultInvariantTest is Test {
                     : request.offer - expectedFromRate;
                 uint256 tolerance = Math.max(expectedFromRate / 2, request.offer / 2); // 50% of either value
 
-                assertLe(
-                    diff,
-                    tolerance,
-                    "Expected withdrawal amount should be within reasonable range"
-                );
+                assertLe(diff, tolerance, "Expected withdrawal amount should be within reasonable range");
 
                 // INVARIANT: Deadline should be in the future or recent past (allow some grace)
                 // In testing, we may have old pending requests
-                assertTrue(
-                    request.deadline > 0,
-                    "Active request should have non-zero deadline"
-                );
+                assertTrue(request.deadline > 0, "Active request should have non-zero deadline");
             }
         }
     }
@@ -549,10 +492,7 @@ contract BoringVaultInvariantTest is Test {
             // distributable without affecting principal
             assertTrue(
                 balance >= deposits,
-                string(abi.encodePacked(
-                    "Balance should be >= deposits for ",
-                    _addressToString(asset)
-                ))
+                string(abi.encodePacked("Balance should be >= deposits for ", _addressToString(asset)))
             );
         }
     }
@@ -923,11 +863,10 @@ contract MockTeller {
         accountant = _accountant;
     }
 
-    function deposit(
-        MockERC20 depositAsset,
-        uint256 depositAmount,
-        uint256 minimumMint
-    ) external returns (uint256 shares) {
+    function deposit(MockERC20 depositAsset, uint256 depositAmount, uint256 minimumMint)
+        external
+        returns (uint256 shares)
+    {
         require(!paused, "Teller paused");
 
         // Calculate shares using accountant rate
@@ -995,19 +934,15 @@ contract MockAtomicQueue {
 
     mapping(address => mapping(address => mapping(address => AtomicRequest))) public requests;
 
-    function updateAtomicRequest(
-        MockERC20 offer,
-        MockERC20 want,
-        AtomicRequest calldata request
-    ) external {
+    function updateAtomicRequest(MockERC20 offer, MockERC20 want, AtomicRequest calldata request) external {
         requests[msg.sender][address(offer)][address(want)] = request;
     }
 
-    function getUserAtomicRequest(
-        address user,
-        MockERC20 offer,
-        MockERC20 want
-    ) external view returns (AtomicRequest memory) {
+    function getUserAtomicRequest(address user, MockERC20 offer, MockERC20 want)
+        external
+        view
+        returns (AtomicRequest memory)
+    {
         return requests[user][address(offer)][address(want)];
     }
 }

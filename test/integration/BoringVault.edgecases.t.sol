@@ -70,12 +70,7 @@ contract BoringVaultEdgeCasesTest is Test {
     // ============================================
 
     event DepositCompleted(address indexed token, uint256 amount, uint256 sharesReceived);
-    event WithdrawalQueued(
-        address indexed asset,
-        uint256 shareAmount,
-        uint256 expectedAmount,
-        uint64 deadline
-    );
+    event WithdrawalQueued(address indexed asset, uint256 shareAmount, uint256 expectedAmount, uint64 deadline);
 
     // ============================================
     // Setup
@@ -108,11 +103,7 @@ contract BoringVaultEdgeCasesTest is Test {
         accountant.setRate(1.0e18);
 
         // Deploy BoringVault implementation
-        implementation = new BoringVault(
-            address(vaultToken),
-            address(teller),
-            address(accountant)
-        );
+        implementation = new BoringVault(address(vaultToken), address(teller), address(accountant));
 
         // Deploy and initialize proxy with all tokens
         address[] memory tokens = new address[](4);
@@ -436,13 +427,7 @@ contract BoringVaultEdgeCasesTest is Test {
     function testEdgeCase_ExtremeSlippage_ExceedsLimit() public {
         // Try to set slippage above 10% (1001 BPS)
         vm.prank(owner);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                BoringVault.SlippageExceedsLimit.selector,
-                1001,
-                1000
-            )
-        );
+        vm.expectRevert(abi.encodeWithSelector(BoringVault.SlippageExceedsLimit.selector, 1001, 1000));
         boringVault.setMaxSlippage(1001);
     }
 
@@ -994,11 +979,10 @@ contract MockTeller {
         accountant = _accountant;
     }
 
-    function deposit(
-        MockERC20 depositAsset,
-        uint256 depositAmount,
-        uint256 minimumMint
-    ) external returns (uint256 shares) {
+    function deposit(MockERC20 depositAsset, uint256 depositAmount, uint256 minimumMint)
+        external
+        returns (uint256 shares)
+    {
         require(!paused, "Teller paused");
 
         require(depositAsset.balanceOf(msg.sender) >= depositAmount, "Insufficient balance");
@@ -1079,11 +1063,7 @@ contract MockAtomicQueue {
 
     mapping(address => mapping(address => mapping(address => AtomicRequest))) public requests;
 
-    function updateAtomicRequest(
-        MockERC20 offer,
-        MockERC20 want,
-        AtomicRequest calldata request
-    ) external {
+    function updateAtomicRequest(MockERC20 offer, MockERC20 want, AtomicRequest calldata request) external {
         // Get previous request to check if cancelling
         AtomicRequest memory previousRequest = requests[msg.sender][address(offer)][address(want)];
 
@@ -1102,11 +1082,11 @@ contract MockAtomicQueue {
         }
     }
 
-    function getUserAtomicRequest(
-        address user,
-        MockERC20 offer,
-        MockERC20 want
-    ) external view returns (AtomicRequest memory) {
+    function getUserAtomicRequest(address user, MockERC20 offer, MockERC20 want)
+        external
+        view
+        returns (AtomicRequest memory)
+    {
         return requests[user][address(offer)][address(want)];
     }
 }

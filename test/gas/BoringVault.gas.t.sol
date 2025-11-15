@@ -91,8 +91,8 @@ contract BoringVaultGasTest is Test {
         // Deploy BoringVault implementation (with immutable addresses)
         implementation = new BoringVault(
             address(vaultToken), // vault
-            address(teller),     // teller
-            address(accountant)  // accountant
+            address(teller), // teller
+            address(accountant) // accountant
         );
 
         // Deploy and initialize proxy
@@ -117,13 +117,7 @@ contract BoringVaultGasTest is Test {
         bool[] memory _accepted
     ) internal returns (BoringVault) {
         bytes memory initData = abi.encodeWithSelector(
-            BoringVault.initialize.selector,
-            _owner,
-            _kingVault,
-            _priceProvider,
-            _atomicQueue,
-            _tokens,
-            _accepted
+            BoringVault.initialize.selector, _owner, _kingVault, _priceProvider, _atomicQueue, _tokens, _accepted
         );
         ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initData);
         return BoringVault(address(proxy));
@@ -139,24 +133,14 @@ contract BoringVaultGasTest is Test {
         accepted[1] = true;
         accepted[2] = true;
 
-        return _deployBoringVault(
-            owner,
-            kingVault,
-            address(priceProvider),
-            address(atomicQueue),
-            tokens,
-            accepted
-        );
+        return _deployBoringVault(owner, kingVault, address(priceProvider), address(atomicQueue), tokens, accepted);
     }
 
     function _recordGas(string memory operation, uint256 gasUsed, uint256 gasLimit) internal {
         bool withinLimit = gasUsed <= gasLimit;
-        gasReports.push(GasReport({
-            operation: operation,
-            gasUsed: gasUsed,
-            gasLimit: gasLimit,
-            withinLimit: withinLimit
-        }));
+        gasReports.push(
+            GasReport({operation: operation, gasUsed: gasUsed, gasLimit: gasLimit, withinLimit: withinLimit})
+        );
 
         console2.log("Gas Report:");
         console2.log("  Operation:", operation);
@@ -732,11 +716,7 @@ contract MockTeller {
         return paused;
     }
 
-    function deposit(
-        address asset,
-        uint256 amount,
-        uint256 minimumMint
-    ) external returns (uint256 shares) {
+    function deposit(address asset, uint256 amount, uint256 minimumMint) external returns (uint256 shares) {
         require(!paused, "Teller paused");
         // Use burn/mint pattern to avoid approval issues
         MockERC20(asset).burn(msg.sender, amount);
@@ -809,18 +789,11 @@ contract MockAtomicQueue {
         bool inSolve;
     }
 
-    function updateAtomicRequest(
-        address vault,
-        address asset,
-        AtomicRequest calldata request
-    ) external {
+    function updateAtomicRequest(address vault, address asset, AtomicRequest calldata request) external {
         userAtomicRequest[msg.sender][asset] = request;
     }
 
-    function getUserAtomicRequest(
-        address user,
-        address asset
-    ) external view returns (AtomicRequest memory) {
+    function getUserAtomicRequest(address user, address asset) external view returns (AtomicRequest memory) {
         return userAtomicRequest[user][asset];
     }
 }

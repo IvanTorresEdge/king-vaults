@@ -80,8 +80,8 @@ contract CoreInfrastructureTest is Test {
         // Deploy BoringVault implementation (with immutable addresses)
         implementation = new BoringVault(
             address(vaultToken), // vault
-            address(teller),     // teller
-            address(accountant)  // accountant
+            address(teller), // teller
+            address(accountant) // accountant
         );
     }
 
@@ -101,13 +101,7 @@ contract CoreInfrastructureTest is Test {
         bool[] memory _accepted
     ) internal returns (BoringVault) {
         bytes memory initData = abi.encodeWithSelector(
-            BoringVault.initialize.selector,
-            _owner,
-            _kingVault,
-            _priceProvider,
-            _atomicQueue,
-            _tokens,
-            _accepted
+            BoringVault.initialize.selector, _owner, _kingVault, _priceProvider, _atomicQueue, _tokens, _accepted
         );
         ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initData);
         return BoringVault(address(proxy));
@@ -124,14 +118,7 @@ contract CoreInfrastructureTest is Test {
         accepted[0] = true;
         accepted[1] = true;
 
-        return _deployBoringVault(
-            owner,
-            kingVault,
-            address(priceProvider),
-            address(atomicQueue),
-            tokens,
-            accepted
-        );
+        return _deployBoringVault(owner, kingVault, address(priceProvider), address(atomicQueue), tokens, accepted);
     }
 
     // ============================================
@@ -144,14 +131,8 @@ contract CoreInfrastructureTest is Test {
         bool[] memory accepted = new bool[](1);
         accepted[0] = true;
 
-        boringVault = _deployBoringVault(
-            owner,
-            kingVault,
-            address(priceProvider),
-            address(atomicQueue),
-            tokens,
-            accepted
-        );
+        boringVault =
+            _deployBoringVault(owner, kingVault, address(priceProvider), address(atomicQueue), tokens, accepted);
 
         // Verify owner set correctly
         assertEq(boringVault.owner(), owner);
@@ -185,12 +166,7 @@ contract CoreInfrastructureTest is Test {
         bool[] memory emptyAccepted = new bool[](0);
 
         boringVault = _deployBoringVault(
-            owner,
-            kingVault,
-            address(priceProvider),
-            address(atomicQueue),
-            emptyTokens,
-            emptyAccepted
+            owner, kingVault, address(priceProvider), address(atomicQueue), emptyTokens, emptyAccepted
         );
 
         assertEq(boringVault.owner(), owner);
@@ -205,14 +181,8 @@ contract CoreInfrastructureTest is Test {
         accepted[0] = true;
         accepted[1] = true;
 
-        boringVault = _deployBoringVault(
-            owner,
-            kingVault,
-            address(priceProvider),
-            address(atomicQueue),
-            tokens,
-            accepted
-        );
+        boringVault =
+            _deployBoringVault(owner, kingVault, address(priceProvider), address(atomicQueue), tokens, accepted);
 
         // Verify both tokens registered
         address[] memory registeredAssets = boringVault.assets();
@@ -228,14 +198,7 @@ contract CoreInfrastructureTest is Test {
         bool[] memory accepted = new bool[](0);
 
         vm.expectRevert(IKingVault.ZeroAddress.selector);
-        _deployBoringVault(
-            address(0),
-            kingVault,
-            address(priceProvider),
-            address(atomicQueue),
-            tokens,
-            accepted
-        );
+        _deployBoringVault(address(0), kingVault, address(priceProvider), address(atomicQueue), tokens, accepted);
     }
 
     function test_Initialize_RevertsWithZeroKingVault() public {
@@ -243,14 +206,7 @@ contract CoreInfrastructureTest is Test {
         bool[] memory accepted = new bool[](0);
 
         vm.expectRevert(IKingVault.ZeroAddress.selector);
-        _deployBoringVault(
-            owner,
-            address(0),
-            address(priceProvider),
-            address(atomicQueue),
-            tokens,
-            accepted
-        );
+        _deployBoringVault(owner, address(0), address(priceProvider), address(atomicQueue), tokens, accepted);
     }
 
     function test_Initialize_RevertsWithZeroPriceProvider() public {
@@ -258,14 +214,7 @@ contract CoreInfrastructureTest is Test {
         bool[] memory accepted = new bool[](0);
 
         vm.expectRevert(IKingVault.ZeroAddress.selector);
-        _deployBoringVault(
-            owner,
-            kingVault,
-            address(0),
-            address(atomicQueue),
-            tokens,
-            accepted
-        );
+        _deployBoringVault(owner, kingVault, address(0), address(atomicQueue), tokens, accepted);
     }
 
     function test_Initialize_RevertsWithZeroAtomicQueue() public {
@@ -273,14 +222,7 @@ contract CoreInfrastructureTest is Test {
         bool[] memory accepted = new bool[](0);
 
         vm.expectRevert(IKingVault.ZeroAddress.selector);
-        _deployBoringVault(
-            owner,
-            kingVault,
-            address(priceProvider),
-            address(0),
-            tokens,
-            accepted
-        );
+        _deployBoringVault(owner, kingVault, address(priceProvider), address(0), tokens, accepted);
     }
 
     // ============================================
@@ -295,14 +237,7 @@ contract CoreInfrastructureTest is Test {
 
         // Attempt to reinitialize should fail
         vm.expectRevert();
-        boringVault.initialize(
-            owner,
-            kingVault,
-            address(priceProvider),
-            address(atomicQueue),
-            tokens,
-            accepted
-        );
+        boringVault.initialize(owner, kingVault, address(priceProvider), address(atomicQueue), tokens, accepted);
     }
 
     function test_Initialize_ImplementationCannotBeInitialized() public {
@@ -311,14 +246,7 @@ contract CoreInfrastructureTest is Test {
 
         // Implementation contract should have initializers disabled
         vm.expectRevert();
-        implementation.initialize(
-            owner,
-            kingVault,
-            address(priceProvider),
-            address(atomicQueue),
-            tokens,
-            accepted
-        );
+        implementation.initialize(owner, kingVault, address(priceProvider), address(atomicQueue), tokens, accepted);
     }
 
     // ============================================
@@ -328,7 +256,7 @@ contract CoreInfrastructureTest is Test {
     function test_Constructor_RevertsWithZeroVault() public {
         vm.expectRevert(IKingVault.ZeroAddress.selector);
         new BoringVault(
-            address(0),          // zero vault
+            address(0), // zero vault
             address(teller),
             address(accountant)
         );
@@ -338,7 +266,7 @@ contract CoreInfrastructureTest is Test {
         vm.expectRevert(IKingVault.ZeroAddress.selector);
         new BoringVault(
             address(vaultToken),
-            address(0),          // zero teller
+            address(0), // zero teller
             address(accountant)
         );
     }
@@ -348,16 +276,12 @@ contract CoreInfrastructureTest is Test {
         new BoringVault(
             address(vaultToken),
             address(teller),
-            address(0)           // zero accountant
+            address(0) // zero accountant
         );
     }
 
     function test_Constructor_SetsImmutableAddresses() public {
-        BoringVault vault = new BoringVault(
-            address(vaultToken),
-            address(teller),
-            address(accountant)
-        );
+        BoringVault vault = new BoringVault(address(vaultToken), address(teller), address(accountant));
 
         assertEq(vault.vault(), address(vaultToken));
         assertEq(vault.teller(), address(teller));
@@ -908,11 +832,10 @@ contract MockTeller {
         vault = _vault;
     }
 
-    function deposit(
-        MockERC20 depositAsset,
-        uint256 depositAmount,
-        uint256 minimumMint
-    ) external returns (uint256 shares) {
+    function deposit(MockERC20 depositAsset, uint256 depositAmount, uint256 minimumMint)
+        external
+        returns (uint256 shares)
+    {
         require(!paused, "Teller paused");
 
         // Transfer assets from caller to vault
@@ -988,19 +911,15 @@ contract MockAtomicQueue {
 
     mapping(address => mapping(address => mapping(address => AtomicRequest))) public requests;
 
-    function updateAtomicRequest(
-        MockERC20 offer,
-        MockERC20 want,
-        AtomicRequest calldata request
-    ) external {
+    function updateAtomicRequest(MockERC20 offer, MockERC20 want, AtomicRequest calldata request) external {
         requests[msg.sender][address(offer)][address(want)] = request;
     }
 
-    function getUserAtomicRequest(
-        address user,
-        MockERC20 offer,
-        MockERC20 want
-    ) external view returns (AtomicRequest memory) {
+    function getUserAtomicRequest(address user, MockERC20 offer, MockERC20 want)
+        external
+        view
+        returns (AtomicRequest memory)
+    {
         return requests[user][address(offer)][address(want)];
     }
 }

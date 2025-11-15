@@ -21,11 +21,9 @@ interface ITellerWithMultiAssetSupport {
      * @param minimumMint Minimum shares to receive (slippage protection)
      * @return shares Amount of BoringVault shares minted to caller
      */
-    function deposit(
-        ERC20 depositAsset,
-        uint256 depositAmount,
-        uint256 minimumMint
-    ) external returns (uint256 shares);
+    function deposit(ERC20 depositAsset, uint256 depositAmount, uint256 minimumMint)
+        external
+        returns (uint256 shares);
 
     /**
      * @notice Get the Accountant contract address

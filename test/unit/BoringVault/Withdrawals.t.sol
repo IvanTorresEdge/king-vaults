@@ -61,19 +61,11 @@ contract WithdrawalsTest is Test {
     // ============================================
 
     event Withdrawn(address[] assets, uint256[] amounts, address receiver, uint256 timestamp);
-    event WithdrawalQueued(
-        address indexed asset,
-        uint256 shareAmount,
-        uint256 expectedAmount,
-        uint64 deadline
-    );
+    event WithdrawalQueued(address indexed asset, uint256 shareAmount, uint256 expectedAmount, uint64 deadline);
     event WithdrawalConfirmed(address indexed asset, uint256 amountReceived);
     event WithdrawalCancelled(address indexed asset, uint256 shareAmount);
     event PrincipalWithdrawCompleted(
-        address indexed asset,
-        uint256 amount,
-        address indexed receiver,
-        uint256 timestamp
+        address indexed asset, uint256 amount, address indexed receiver, uint256 timestamp
     );
     event WithdrawFromVaultCancelled(address indexed asset, uint256 amount, uint256 timestamp);
 
@@ -108,8 +100,8 @@ contract WithdrawalsTest is Test {
         // Deploy BoringVault implementation (with immutable addresses)
         implementation = new BoringVault(
             address(vaultToken), // vault
-            address(teller),     // teller
-            address(accountant)  // accountant
+            address(teller), // teller
+            address(accountant) // accountant
         );
 
         // Deploy and initialize proxy
@@ -132,13 +124,7 @@ contract WithdrawalsTest is Test {
         bool[] memory _accepted
     ) internal returns (BoringVault) {
         bytes memory initData = abi.encodeWithSelector(
-            BoringVault.initialize.selector,
-            _owner,
-            _kingVault,
-            _priceProvider,
-            _atomicQueue,
-            _tokens,
-            _accepted
+            BoringVault.initialize.selector, _owner, _kingVault, _priceProvider, _atomicQueue, _tokens, _accepted
         );
         ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initData);
         return BoringVault(address(proxy));
@@ -157,14 +143,7 @@ contract WithdrawalsTest is Test {
         accepted[1] = true;
         accepted[2] = true;
 
-        return _deployBoringVault(
-            owner,
-            kingVault,
-            address(priceProvider),
-            address(atomicQueue),
-            tokens,
-            accepted
-        );
+        return _deployBoringVault(owner, kingVault, address(priceProvider), address(atomicQueue), tokens, accepted);
     }
 
     /**
@@ -1239,11 +1218,10 @@ contract MockTeller {
         accountant = _accountant;
     }
 
-    function deposit(
-        MockERC20 depositAsset,
-        uint256 depositAmount,
-        uint256 minimumMint
-    ) external returns (uint256 shares) {
+    function deposit(MockERC20 depositAsset, uint256 depositAmount, uint256 minimumMint)
+        external
+        returns (uint256 shares)
+    {
         require(!paused, "Teller paused");
 
         // Verify caller has sufficient balance
@@ -1340,19 +1318,15 @@ contract MockAtomicQueue {
 
     mapping(address => mapping(address => mapping(address => AtomicRequest))) public requests;
 
-    function updateAtomicRequest(
-        MockERC20 offer,
-        MockERC20 want,
-        AtomicRequest calldata request
-    ) external {
+    function updateAtomicRequest(MockERC20 offer, MockERC20 want, AtomicRequest calldata request) external {
         requests[msg.sender][address(offer)][address(want)] = request;
     }
 
-    function getUserAtomicRequest(
-        address user,
-        MockERC20 offer,
-        MockERC20 want
-    ) external view returns (AtomicRequest memory) {
+    function getUserAtomicRequest(address user, MockERC20 offer, MockERC20 want)
+        external
+        view
+        returns (AtomicRequest memory)
+    {
         return requests[user][address(offer)][address(want)];
     }
 }

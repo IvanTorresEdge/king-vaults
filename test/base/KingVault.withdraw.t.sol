@@ -15,9 +15,9 @@ contract KingVaultWithdrawTest is Test {
     KingVaultHarness public vault;
     KingVaultHarness public implementation;
 
-    MockERC20 public usdc;  // 6 decimals
-    MockERC20 public weth;  // 18 decimals
-    MockERC20 public dai;   // 18 decimals
+    MockERC20 public usdc; // 6 decimals
+    MockERC20 public weth; // 18 decimals
+    MockERC20 public dai; // 18 decimals
 
     address public owner = address(0x1);
     address public kingVault = address(0x2);
@@ -30,12 +30,8 @@ contract KingVaultWithdrawTest is Test {
         implementation = new KingVaultHarness();
 
         // Deploy proxy
-        bytes memory initData = abi.encodeWithSelector(
-            KingVaultHarness.initialize.selector,
-            owner,
-            kingVault,
-            priceProvider
-        );
+        bytes memory initData =
+            abi.encodeWithSelector(KingVaultHarness.initialize.selector, owner, kingVault, priceProvider);
         ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initData);
         vault = KingVaultHarness(address(proxy));
 
@@ -58,9 +54,9 @@ contract KingVaultWithdrawTest is Test {
         vault.registerTokens(tokens, accepted);
 
         // Mint tokens to kingVault
-        usdc.mint(kingVault, 1_000_000e6);  // 1M USDC
-        weth.mint(kingVault, 1000e18);       // 1000 WETH
-        dai.mint(kingVault, 1_000_000e18);   // 1M DAI
+        usdc.mint(kingVault, 1_000_000e6); // 1M USDC
+        weth.mint(kingVault, 1000e18); // 1000 WETH
+        dai.mint(kingVault, 1_000_000e18); // 1M DAI
 
         // Approve vault to spend tokens
         vm.startPrank(kingVault);
@@ -75,9 +71,9 @@ contract KingVaultWithdrawTest is Test {
         depositTokens[1] = address(weth);
         depositTokens[2] = address(dai);
         uint256[] memory depositAmounts = new uint256[](3);
-        depositAmounts[0] = 10_000e6;   // 10k USDC
-        depositAmounts[1] = 10e18;      // 10 WETH
-        depositAmounts[2] = 10_000e18;  // 10k DAI
+        depositAmounts[0] = 10_000e6; // 10k USDC
+        depositAmounts[1] = 10e18; // 10 WETH
+        depositAmounts[2] = 10_000e18; // 10k DAI
 
         vm.prank(kingVault);
         vault.deposit(depositTokens, depositAmounts);
@@ -116,9 +112,9 @@ contract KingVaultWithdrawTest is Test {
         tokens[1] = address(weth);
         tokens[2] = address(dai);
         uint256[] memory amounts = new uint256[](3);
-        amounts[0] = 3_000e6;   // 3k USDC
-        amounts[1] = 2e18;      // 2 WETH
-        amounts[2] = 5_000e18;  // 5k DAI
+        amounts[0] = 3_000e6; // 3k USDC
+        amounts[1] = 2e18; // 2 WETH
+        amounts[2] = 5_000e18; // 5k DAI
 
         // Assert initial state
         assertEq(usdc.balanceOf(receiver), 0);
@@ -201,7 +197,7 @@ contract KingVaultWithdrawTest is Test {
 
         // Act & Assert
         vm.prank(kingVault);
-        vm.expectRevert();  // PausableUpgradeable reverts with EnforcedPause()
+        vm.expectRevert(); // PausableUpgradeable reverts with EnforcedPause()
         vault.withdraw(tokens, amounts, receiver);
     }
 
@@ -245,12 +241,7 @@ contract KingVaultWithdrawTest is Test {
         // Act & Assert
         vm.prank(kingVault);
         vm.expectRevert(
-            abi.encodeWithSelector(
-                IKingVault.InsufficientBalance.selector,
-                address(usdc),
-                20_000e6,
-                10_000e6
-            )
+            abi.encodeWithSelector(IKingVault.InsufficientBalance.selector, address(usdc), 20_000e6, 10_000e6)
         );
         vault.withdraw(tokens, amounts, receiver);
     }

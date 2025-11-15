@@ -15,10 +15,10 @@ contract KingVaultWithdrawEdgeTest is Test {
     KingVaultHarness public vault;
     KingVaultHarness public implementation;
 
-    MockERC20 public usdc;   // 6 decimals
-    MockERC20 public wbtc;   // 8 decimals
-    MockERC20 public weth;   // 18 decimals
-    MockERC20 public dai;    // 18 decimals
+    MockERC20 public usdc; // 6 decimals
+    MockERC20 public wbtc; // 8 decimals
+    MockERC20 public weth; // 18 decimals
+    MockERC20 public dai; // 18 decimals
 
     address public owner = address(0x1);
     address public kingVault = address(0x2);
@@ -30,12 +30,8 @@ contract KingVaultWithdrawEdgeTest is Test {
         implementation = new KingVaultHarness();
 
         // Deploy proxy
-        bytes memory initData = abi.encodeWithSelector(
-            KingVaultHarness.initialize.selector,
-            owner,
-            kingVault,
-            priceProvider
-        );
+        bytes memory initData =
+            abi.encodeWithSelector(KingVaultHarness.initialize.selector, owner, kingVault, priceProvider);
         ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initData);
         vault = KingVaultHarness(address(proxy));
 
@@ -61,10 +57,10 @@ contract KingVaultWithdrawEdgeTest is Test {
         vault.registerTokens(tokens, accepted);
 
         // Mint tokens to kingVault
-        usdc.mint(kingVault, 1_000_000e6);   // 1M USDC
-        wbtc.mint(kingVault, 100e8);         // 100 WBTC
-        weth.mint(kingVault, 1000e18);       // 1000 WETH
-        dai.mint(kingVault, 1_000_000e18);   // 1M DAI
+        usdc.mint(kingVault, 1_000_000e6); // 1M USDC
+        wbtc.mint(kingVault, 100e8); // 100 WBTC
+        weth.mint(kingVault, 1000e18); // 1000 WETH
+        dai.mint(kingVault, 1_000_000e18); // 1M DAI
 
         // Approve vault to spend tokens
         vm.startPrank(kingVault);
@@ -97,7 +93,7 @@ contract KingVaultWithdrawEdgeTest is Test {
         address[] memory withdrawTokens = new address[](1);
         withdrawTokens[0] = address(usdc);
         uint256[] memory withdrawAmounts = new uint256[](1);
-        withdrawAmounts[0] = 3_000e6;  // 3k out of 10k
+        withdrawAmounts[0] = 3_000e6; // 3k out of 10k
 
         vm.prank(kingVault);
         vault.withdraw(withdrawTokens, withdrawAmounts, receiver);
@@ -108,7 +104,7 @@ contract KingVaultWithdrawEdgeTest is Test {
         assertEq(usdc.balanceOf(receiver), 3_000e6, "Receiver should have 3k");
 
         // Act - withdraw another partial amount
-        withdrawAmounts[0] = 2_000e6;  // Another 2k
+        withdrawAmounts[0] = 2_000e6; // Another 2k
         vm.prank(kingVault);
         vault.withdraw(withdrawTokens, withdrawAmounts, receiver);
 
@@ -143,9 +139,9 @@ contract KingVaultWithdrawEdgeTest is Test {
         withdrawTokens[1] = address(weth);
         withdrawTokens[2] = address(dai);
         uint256[] memory withdrawAmounts = new uint256[](3);
-        withdrawAmounts[0] = 10_000e6;   // Withdraw 20% of USDC
-        withdrawAmounts[1] = 15e18;      // Withdraw 60% of WETH
-        withdrawAmounts[2] = 75_000e18;  // Withdraw 75% of DAI
+        withdrawAmounts[0] = 10_000e6; // Withdraw 20% of USDC
+        withdrawAmounts[1] = 15e18; // Withdraw 60% of WETH
+        withdrawAmounts[2] = 75_000e18; // Withdraw 75% of DAI
 
         vm.prank(kingVault);
         vault.withdraw(withdrawTokens, withdrawAmounts, receiver);
@@ -168,13 +164,13 @@ contract KingVaultWithdrawEdgeTest is Test {
     function test_Withdraw_DifferentDecimals() public {
         // Arrange - deposit tokens with different decimals
         address[] memory depositTokens = new address[](3);
-        depositTokens[0] = address(usdc);  // 6 decimals
-        depositTokens[1] = address(wbtc);  // 8 decimals
-        depositTokens[2] = address(weth);  // 18 decimals
+        depositTokens[0] = address(usdc); // 6 decimals
+        depositTokens[1] = address(wbtc); // 8 decimals
+        depositTokens[2] = address(weth); // 18 decimals
         uint256[] memory depositAmounts = new uint256[](3);
-        depositAmounts[0] = 10_000e6;   // 10k USDC
-        depositAmounts[1] = 5e8;        // 5 WBTC
-        depositAmounts[2] = 20e18;      // 20 WETH
+        depositAmounts[0] = 10_000e6; // 10k USDC
+        depositAmounts[1] = 5e8; // 5 WBTC
+        depositAmounts[2] = 20e18; // 20 WETH
 
         vm.prank(kingVault);
         vault.deposit(depositTokens, depositAmounts);
@@ -185,9 +181,9 @@ contract KingVaultWithdrawEdgeTest is Test {
         withdrawTokens[1] = address(wbtc);
         withdrawTokens[2] = address(weth);
         uint256[] memory withdrawAmounts = new uint256[](3);
-        withdrawAmounts[0] = 3_000e6;   // 3k USDC (6 decimals)
-        withdrawAmounts[1] = 2e8;       // 2 WBTC (8 decimals)
-        withdrawAmounts[2] = 7e18;      // 7 WETH (18 decimals)
+        withdrawAmounts[0] = 3_000e6; // 3k USDC (6 decimals)
+        withdrawAmounts[1] = 2e8; // 2 WBTC (8 decimals)
+        withdrawAmounts[2] = 7e18; // 7 WETH (18 decimals)
 
         vm.prank(kingVault);
         vault.withdraw(withdrawTokens, withdrawAmounts, receiver);
@@ -227,8 +223,8 @@ contract KingVaultWithdrawEdgeTest is Test {
         withdrawTokens[0] = address(usdc);
         withdrawTokens[1] = address(wbtc);
         uint256[] memory withdrawAmounts = new uint256[](2);
-        withdrawAmounts[0] = 10_000e6;  // Withdraw all USDC
-        withdrawAmounts[1] = 5e8;       // Withdraw all WBTC
+        withdrawAmounts[0] = 10_000e6; // Withdraw all USDC
+        withdrawAmounts[1] = 5e8; // Withdraw all WBTC
 
         vm.prank(kingVault);
         vault.withdraw(withdrawTokens, withdrawAmounts, receiver);

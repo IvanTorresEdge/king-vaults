@@ -420,8 +420,7 @@ contract KingVaultDistributeProfitsTest is Test {
         vault.distributeProfits();
 
         // Assert rounding works (Math.mulDiv handles precision)
-        uint256 totalDistributed =
-            usdc.balanceOf(treasury) + usdc.balanceOf(devFund) + usdc.balanceOf(marketingFund);
+        uint256 totalDistributed = usdc.balanceOf(treasury) + usdc.balanceOf(devFund) + usdc.balanceOf(marketingFund);
         assertLe(totalDistributed, 3, "Should distribute at most 3 wei");
     }
 

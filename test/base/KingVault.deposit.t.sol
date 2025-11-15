@@ -15,9 +15,9 @@ contract KingVaultDepositTest is Test {
     KingVaultHarness public vault;
     KingVaultHarness public implementation;
 
-    MockERC20 public usdc;  // 6 decimals
-    MockERC20 public weth;  // 18 decimals
-    MockERC20 public dai;   // 18 decimals
+    MockERC20 public usdc; // 6 decimals
+    MockERC20 public weth; // 18 decimals
+    MockERC20 public dai; // 18 decimals
 
     address public owner = address(0x1);
     address public kingVault = address(0x2);
@@ -29,12 +29,8 @@ contract KingVaultDepositTest is Test {
         implementation = new KingVaultHarness();
 
         // Deploy proxy
-        bytes memory initData = abi.encodeWithSelector(
-            KingVaultHarness.initialize.selector,
-            owner,
-            kingVault,
-            priceProvider
-        );
+        bytes memory initData =
+            abi.encodeWithSelector(KingVaultHarness.initialize.selector, owner, kingVault, priceProvider);
         ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initData);
         vault = KingVaultHarness(address(proxy));
 
@@ -57,9 +53,9 @@ contract KingVaultDepositTest is Test {
         vault.registerTokens(tokens, accepted);
 
         // Mint tokens to kingVault
-        usdc.mint(kingVault, 1_000_000e6);  // 1M USDC
-        weth.mint(kingVault, 1000e18);       // 1000 WETH
-        dai.mint(kingVault, 1_000_000e18);   // 1M DAI
+        usdc.mint(kingVault, 1_000_000e6); // 1M USDC
+        weth.mint(kingVault, 1000e18); // 1000 WETH
+        dai.mint(kingVault, 1_000_000e18); // 1M DAI
 
         // Approve vault to spend tokens
         vm.startPrank(kingVault);
@@ -101,8 +97,8 @@ contract KingVaultDepositTest is Test {
         tokens[1] = address(weth);
         tokens[2] = address(dai);
         uint256[] memory amounts = new uint256[](3);
-        amounts[0] = 50_000e6;   // 50k USDC
-        amounts[1] = 10e18;      // 10 WETH
+        amounts[0] = 50_000e6; // 50k USDC
+        amounts[1] = 10e18; // 10 WETH
         amounts[2] = 100_000e18; // 100k DAI
 
         // Assert initial state

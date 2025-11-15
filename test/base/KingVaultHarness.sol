@@ -20,11 +20,7 @@ contract KingVaultHarness is KingVault {
      * @param _kingVault Address of King's core vault
      * @param _priceProvider Address of the price provider
      */
-    function initialize(
-        address _owner,
-        address _kingVault,
-        address _priceProvider
-    ) external initializer {
+    function initialize(address _owner, address _kingVault, address _priceProvider) external initializer {
         address[] memory emptyTokens = new address[](0);
         bool[] memory emptyAccepted = new bool[](0);
         __KingVault_init(_owner, _kingVault, _priceProvider, emptyTokens, emptyAccepted);

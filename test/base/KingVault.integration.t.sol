@@ -46,9 +46,8 @@ contract KingVaultIntegrationTest is Test {
         implementation = new KingVaultHarness();
 
         // Deploy proxy
-        bytes memory initData = abi.encodeWithSelector(
-            KingVaultHarness.initialize.selector, owner, kingVault, address(priceProvider)
-        );
+        bytes memory initData =
+            abi.encodeWithSelector(KingVaultHarness.initialize.selector, owner, kingVault, address(priceProvider));
 
         ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initData);
         vault = KingVaultHarness(address(proxy));
@@ -188,9 +187,8 @@ contract KingVaultIntegrationTest is Test {
 
     function test_Integration_MultipleVaults() public {
         // Deploy second vault instance
-        bytes memory initData = abi.encodeWithSelector(
-            KingVaultHarness.initialize.selector, owner, kingVault, address(priceProvider)
-        );
+        bytes memory initData =
+            abi.encodeWithSelector(KingVaultHarness.initialize.selector, owner, kingVault, address(priceProvider));
 
         ERC1967Proxy proxy2 = new ERC1967Proxy(address(implementation), initData);
         KingVaultHarness vault2 = KingVaultHarness(address(proxy2));

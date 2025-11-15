@@ -19,10 +19,10 @@ interface IAtomicQueue {
      * @param inSolve True if request is currently being solved
      */
     struct AtomicRequest {
-        uint64 deadline;        // Expiration timestamp
-        uint88 atomicPrice;     // Price with slippage (offer asset per share)
-        uint96 offerAmount;     // Shares to withdraw
-        bool inSolve;           // Solver lock flag
+        uint64 deadline; // Expiration timestamp
+        uint88 atomicPrice; // Price with slippage (offer asset per share)
+        uint96 offerAmount; // Shares to withdraw
+        bool inSolve; // Solver lock flag
     }
 
     /**
@@ -35,11 +35,7 @@ interface IAtomicQueue {
      * @param want ERC20 asset desired in return (e.g., WETH)
      * @param request AtomicRequest struct with deadline, price, amount, inSolve
      */
-    function updateAtomicRequest(
-        ERC20 offer,
-        ERC20 want,
-        AtomicRequest calldata request
-    ) external;
+    function updateAtomicRequest(ERC20 offer, ERC20 want, AtomicRequest calldata request) external;
 
     /**
      * @notice Get user's current atomic withdrawal request
@@ -50,9 +46,5 @@ interface IAtomicQueue {
      * @param want ERC20 asset desired in return
      * @return AtomicRequest struct with current request details
      */
-    function getUserAtomicRequest(
-        address user,
-        ERC20 offer,
-        ERC20 want
-    ) external view returns (AtomicRequest memory);
+    function getUserAtomicRequest(address user, ERC20 offer, ERC20 want) external view returns (AtomicRequest memory);
 }

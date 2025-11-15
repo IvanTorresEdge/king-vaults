@@ -117,11 +117,11 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
      * @param _amounts Array of amounts to withdraw (must match assets length)
      * @param _receiver Address to receive the withdrawn assets
      */
-    function withdraw(
-        address[] memory _tokens,
-        uint256[] memory _amounts,
-        address _receiver
-    ) external virtual override {
+    function withdraw(address[] memory _tokens, uint256[] memory _amounts, address _receiver)
+        external
+        virtual
+        override
+    {
         // Access control: only kingVault can call
         _requireKingVault();
 
@@ -288,10 +288,11 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
      * @param _recipients Array of recipient addresses to update
      * @param _percentsBPS Array of percentages in basis points (10000 = 100%)
      */
-    function setProfitsDistribution(
-        address[] memory _recipients,
-        uint16[] memory _percentsBPS
-    ) external virtual override {
+    function setProfitsDistribution(address[] memory _recipients, uint16[] memory _percentsBPS)
+        external
+        virtual
+        override
+    {
         // Access control: only owner can set distribution
         _requireOwner();
 
@@ -434,12 +435,7 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
         }
 
         // Emit event with all distribution details
-        emit ProfitsDistributed(
-            _profitsRecipients,
-            finalTokens,
-            finalRecipientAmounts,
-            block.timestamp
-        );
+        emit ProfitsDistributed(_profitsRecipients, finalTokens, finalRecipientAmounts, block.timestamp);
     }
 
     // ============================================

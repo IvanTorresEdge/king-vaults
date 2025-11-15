@@ -11,8 +11,8 @@ contract KingVaultStorageTest is Test {
     KingVaultStorageHarness public vault;
     KingVaultStorageHarness public implementation;
 
-    MockERC20 public token6;  // 6 decimals (USDC-like)
-    MockERC20 public token8;  // 8 decimals (WBTC-like)
+    MockERC20 public token6; // 6 decimals (USDC-like)
+    MockERC20 public token8; // 8 decimals (WBTC-like)
     MockERC20 public token18; // 18 decimals (WETH-like)
 
     address public owner = address(0x1);
@@ -28,12 +28,8 @@ contract KingVaultStorageTest is Test {
         implementation = new KingVaultStorageHarness();
 
         // Deploy proxy
-        bytes memory initData = abi.encodeWithSelector(
-            KingVaultStorageHarness.initialize.selector,
-            owner,
-            kingVault,
-            priceProvider
-        );
+        bytes memory initData =
+            abi.encodeWithSelector(KingVaultStorageHarness.initialize.selector, owner, kingVault, priceProvider);
         ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initData);
         vault = KingVaultStorageHarness(address(proxy));
 

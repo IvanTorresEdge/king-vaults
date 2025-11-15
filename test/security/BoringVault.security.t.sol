@@ -59,26 +59,13 @@ contract BoringVaultSecurityTest is Test {
     event Deposited(address[] assets, uint256[] amounts, uint256 timestamp);
     event Withdrawn(address[] assets, uint256[] amounts, address receiver, uint256 timestamp);
     event DepositCompleted(address indexed token, uint256 amount, uint256 sharesReceived);
-    event WithdrawalQueued(
-        address indexed asset,
-        uint256 shareAmount,
-        uint256 expectedAmount,
-        uint64 deadline
-    );
+    event WithdrawalQueued(address indexed asset, uint256 shareAmount, uint256 expectedAmount, uint64 deadline);
     event PrincipalWithdrawCompleted(
-        address indexed asset,
-        uint256 amount,
-        address indexed receiver,
-        uint256 timestamp
+        address indexed asset, uint256 amount, address indexed receiver, uint256 timestamp
     );
     event ProfitsHarvested(uint256 timestamp);
     event ProfitSharesQueued(uint256 profitShares, uint256 profitValue);
-    event ProfitsDistributed(
-        address[] recipients,
-        address[] assets,
-        uint256[][] amounts,
-        uint256 timestamp
-    );
+    event ProfitsDistributed(address[] recipients, address[] assets, uint256[][] amounts, uint256 timestamp);
     event Paused(address account);
     event Unpaused(address account);
     event EmergencyWithdraw(address[] assets, uint256[] amounts, uint256 timestamp);
@@ -110,11 +97,7 @@ contract BoringVaultSecurityTest is Test {
         accountant.setRate(1.0e18);
 
         // Deploy BoringVault implementation
-        implementation = new BoringVault(
-            address(vaultToken),
-            address(teller),
-            address(accountant)
-        );
+        implementation = new BoringVault(address(vaultToken), address(teller), address(accountant));
 
         // Deploy and initialize proxy
         boringVault = _deployStandardBoringVault();
@@ -136,13 +119,7 @@ contract BoringVaultSecurityTest is Test {
         bool[] memory _accepted
     ) internal returns (BoringVault) {
         bytes memory initData = abi.encodeWithSelector(
-            BoringVault.initialize.selector,
-            _owner,
-            _kingVault,
-            _priceProvider,
-            _atomicQueue,
-            _tokens,
-            _accepted
+            BoringVault.initialize.selector, _owner, _kingVault, _priceProvider, _atomicQueue, _tokens, _accepted
         );
         ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initData);
         return BoringVault(address(proxy));
@@ -156,14 +133,7 @@ contract BoringVaultSecurityTest is Test {
         accepted[0] = true;
         accepted[1] = true;
 
-        return _deployBoringVault(
-            owner,
-            kingVault,
-            address(priceProvider),
-            address(atomicQueue),
-            tokens,
-            accepted
-        );
+        return _deployBoringVault(owner, kingVault, address(priceProvider), address(atomicQueue), tokens, accepted);
     }
 
     function _setupProfitDistribution() internal {
@@ -769,11 +739,7 @@ contract BoringVaultSecurityTest is Test {
 
     function testSecurity_Upgrade_OnlyOwnerCanUpgrade_Succeeds() public {
         // Deploy new implementation
-        BoringVault newImpl = new BoringVault(
-            address(vaultToken),
-            address(teller),
-            address(accountant)
-        );
+        BoringVault newImpl = new BoringVault(address(vaultToken), address(teller), address(accountant));
 
         // Owner can upgrade
         vm.prank(owner);
@@ -796,14 +762,7 @@ contract BoringVaultSecurityTest is Test {
         bool[] memory accepted = new bool[](0);
 
         vm.expectRevert();
-        boringVault.initialize(
-            owner,
-            kingVault,
-            address(priceProvider),
-            address(atomicQueue),
-            tokens,
-            accepted
-        );
+        boringVault.initialize(owner, kingVault, address(priceProvider), address(atomicQueue), tokens, accepted);
     }
 
     function testSecurity_Initialization_ImplementationCannotBeInitialized_Reverts() public {
@@ -811,14 +770,7 @@ contract BoringVaultSecurityTest is Test {
         bool[] memory accepted = new bool[](0);
 
         vm.expectRevert();
-        implementation.initialize(
-            owner,
-            kingVault,
-            address(priceProvider),
-            address(atomicQueue),
-            tokens,
-            accepted
-        );
+        implementation.initialize(owner, kingVault, address(priceProvider), address(atomicQueue), tokens, accepted);
     }
 
     function testSecurity_Initialization_AttackerCannotInitializeNewProxy_Succeeds() public {
@@ -847,12 +799,7 @@ contract BoringVaultSecurityTest is Test {
         vm.prank(attacker);
         vm.expectRevert();
         BoringVault(address(newProxy)).initialize(
-            attacker,
-            attacker,
-            address(priceProvider),
-            address(atomicQueue),
-            tokens,
-            accepted
+            attacker, attacker, address(priceProvider), address(atomicQueue), tokens, accepted
         );
     }
 
@@ -972,13 +919,7 @@ contract BoringVaultSecurityTest is Test {
      */
     function testSecurity_Configuration_CannotSetExcessiveSlippage_Reverts() public {
         vm.prank(owner);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                BoringVault.SlippageExceedsLimit.selector,
-                10_01,
-                10_00
-            )
-        );
+        vm.expectRevert(abi.encodeWithSelector(BoringVault.SlippageExceedsLimit.selector, 10_01, 10_00));
         boringVault.setMaxSlippage(10_01); // 10.01% exceeds 10% limit
     }
 
@@ -1068,11 +1009,10 @@ contract MockTeller {
         accountant = _accountant;
     }
 
-    function deposit(
-        MockERC20 depositAsset,
-        uint256 depositAmount,
-        uint256 minimumMint
-    ) external returns (uint256 shares) {
+    function deposit(MockERC20 depositAsset, uint256 depositAmount, uint256 minimumMint)
+        external
+        returns (uint256 shares)
+    {
         require(!paused, "Teller paused");
 
         // Verify caller has sufficient balance
@@ -1153,19 +1093,15 @@ contract MockAtomicQueue {
 
     mapping(address => mapping(address => mapping(address => AtomicRequest))) public requests;
 
-    function updateAtomicRequest(
-        MockERC20 offer,
-        MockERC20 want,
-        AtomicRequest calldata request
-    ) external {
+    function updateAtomicRequest(MockERC20 offer, MockERC20 want, AtomicRequest calldata request) external {
         requests[msg.sender][address(offer)][address(want)] = request;
     }
 
-    function getUserAtomicRequest(
-        address user,
-        MockERC20 offer,
-        MockERC20 want
-    ) external view returns (AtomicRequest memory) {
+    function getUserAtomicRequest(address user, MockERC20 offer, MockERC20 want)
+        external
+        view
+        returns (AtomicRequest memory)
+    {
         return requests[user][address(offer)][address(want)];
     }
 }

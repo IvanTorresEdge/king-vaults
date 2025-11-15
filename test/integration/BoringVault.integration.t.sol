@@ -63,26 +63,13 @@ contract BoringVaultIntegrationTest is Test {
 
     event Deposited(address[] assets, uint256[] amounts, uint256 timestamp);
     event DepositCompleted(address indexed token, uint256 amount, uint256 sharesReceived);
-    event WithdrawalQueued(
-        address indexed asset,
-        uint256 shareAmount,
-        uint256 expectedAmount,
-        uint64 deadline
-    );
+    event WithdrawalQueued(address indexed asset, uint256 shareAmount, uint256 expectedAmount, uint64 deadline);
     event PrincipalWithdrawCompleted(
-        address indexed asset,
-        uint256 amount,
-        address indexed receiver,
-        uint256 timestamp
+        address indexed asset, uint256 amount, address indexed receiver, uint256 timestamp
     );
     event ProfitsHarvested(uint256 timestamp);
     event ProfitSharesQueued(uint256 profitShares, uint256 profitValue);
-    event ProfitsDistributed(
-        address[] recipients,
-        address[] assets,
-        uint256[][] amounts,
-        uint256 timestamp
-    );
+    event ProfitsDistributed(address[] recipients, address[] assets, uint256[][] amounts, uint256 timestamp);
     event Paused(address account);
     event Unpaused(address account);
     event Withdrawn(address[] assets, uint256[] amounts, address receiver, uint256 timestamp);
@@ -116,11 +103,7 @@ contract BoringVaultIntegrationTest is Test {
         accountant.setRate(1.0e18);
 
         // Deploy BoringVault implementation
-        implementation = new BoringVault(
-            address(vaultToken),
-            address(teller),
-            address(accountant)
-        );
+        implementation = new BoringVault(address(vaultToken), address(teller), address(accountant));
 
         // Deploy and initialize proxy
         boringVault = _deployStandardBoringVault();
@@ -142,13 +125,7 @@ contract BoringVaultIntegrationTest is Test {
         bool[] memory _accepted
     ) internal returns (BoringVault) {
         bytes memory initData = abi.encodeWithSelector(
-            BoringVault.initialize.selector,
-            _owner,
-            _kingVault,
-            _priceProvider,
-            _atomicQueue,
-            _tokens,
-            _accepted
+            BoringVault.initialize.selector, _owner, _kingVault, _priceProvider, _atomicQueue, _tokens, _accepted
         );
         ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initData);
         return BoringVault(address(proxy));
@@ -164,14 +141,7 @@ contract BoringVaultIntegrationTest is Test {
         accepted[1] = true;
         accepted[2] = true;
 
-        return _deployBoringVault(
-            owner,
-            kingVault,
-            address(priceProvider),
-            address(atomicQueue),
-            tokens,
-            accepted
-        );
+        return _deployBoringVault(owner, kingVault, address(priceProvider), address(atomicQueue), tokens, accepted);
     }
 
     function _setupProfitDistribution() internal {
@@ -563,10 +533,9 @@ contract BoringVaultIntegrationTest is Test {
 
         // Verify: TVL reflects changes
         (uint256 ethValue,) = boringVault.tvl();
-        uint256 expectedEth =
-            700e18 + // 700 WETH remaining (principal)
-            (2000e18 * 0.0005e18 / 1e18) + // 2000 ETHFI
-            (1000e6 * 0.0005e18 / 1e6); // 1000 USDC
+        uint256 expectedEth = 700e18 // 700 WETH remaining (principal)
+            + (2000e18 * 0.0005e18 / 1e18) // 2000 ETHFI
+            + (1000e6 * 0.0005e18 / 1e6); // 1000 USDC
         assertEq(ethValue, expectedEth);
     }
 
@@ -707,11 +676,7 @@ contract BoringVaultIntegrationTest is Test {
         address kingVaultBefore = boringVault.kingVault();
 
         // Step 2: Deploy new implementation (BoringVaultV2)
-        BoringVaultV2 newImplementation = new BoringVaultV2(
-            address(vaultToken),
-            address(teller),
-            address(accountant)
-        );
+        BoringVaultV2 newImplementation = new BoringVaultV2(address(vaultToken), address(teller), address(accountant));
 
         // Step 3: Upgrade (owner only)
         vm.prank(owner);
@@ -738,11 +703,7 @@ contract BoringVaultIntegrationTest is Test {
      * @notice Test upgrade fails for unauthorized caller
      */
     function testIntegration_Upgrade_OnlyOwner() public {
-        BoringVaultV2 newImplementation = new BoringVaultV2(
-            address(vaultToken),
-            address(teller),
-            address(accountant)
-        );
+        BoringVaultV2 newImplementation = new BoringVaultV2(address(vaultToken), address(teller), address(accountant));
 
         // Unauthorized cannot upgrade
         vm.prank(unauthorized);
@@ -1015,11 +976,10 @@ contract MockTeller {
         accountant = _accountant;
     }
 
-    function deposit(
-        MockERC20 depositAsset,
-        uint256 depositAmount,
-        uint256 minimumMint
-    ) external returns (uint256 shares) {
+    function deposit(MockERC20 depositAsset, uint256 depositAmount, uint256 minimumMint)
+        external
+        returns (uint256 shares)
+    {
         require(!paused, "Teller paused");
 
         // NOTE: In real Veda Teller:
@@ -1114,11 +1074,7 @@ contract MockAtomicQueue {
 
     mapping(address => mapping(address => mapping(address => AtomicRequest))) public requests;
 
-    function updateAtomicRequest(
-        MockERC20 offer,
-        MockERC20 want,
-        AtomicRequest calldata request
-    ) external {
+    function updateAtomicRequest(MockERC20 offer, MockERC20 want, AtomicRequest calldata request) external {
         requests[msg.sender][address(offer)][address(want)] = request;
 
         // If canceling (deadline = 0), no approval needed
@@ -1128,11 +1084,11 @@ contract MockAtomicQueue {
         offer.transferFrom(msg.sender, address(this), request.offerAmount);
     }
 
-    function getUserAtomicRequest(
-        address user,
-        MockERC20 offer,
-        MockERC20 want
-    ) external view returns (AtomicRequest memory) {
+    function getUserAtomicRequest(address user, MockERC20 offer, MockERC20 want)
+        external
+        view
+        returns (AtomicRequest memory)
+    {
         return requests[user][address(offer)][address(want)];
     }
 }
@@ -1141,11 +1097,7 @@ contract MockAtomicQueue {
  * @notice Mock BoringVaultV2 for upgrade testing
  */
 contract BoringVaultV2 is BoringVault {
-    constructor(
-        address _vault,
-        address _teller,
-        address _accountant
-    ) BoringVault(_vault, _teller, _accountant) {}
+    constructor(address _vault, address _teller, address _accountant) BoringVault(_vault, _teller, _accountant) {}
 
     function version() external pure returns (uint256) {
         return 2;

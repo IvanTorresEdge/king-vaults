@@ -15,9 +15,9 @@ contract KingVaultDepositEdgeCaseTest is Test {
     KingVaultHarness public vault;
     KingVaultHarness public implementation;
 
-    MockERC20 public token6;   // 6 decimals (USDC-like)
-    MockERC20 public token8;   // 8 decimals (WBTC-like)
-    MockERC20 public token18;  // 18 decimals (WETH-like)
+    MockERC20 public token6; // 6 decimals (USDC-like)
+    MockERC20 public token8; // 8 decimals (WBTC-like)
+    MockERC20 public token18; // 18 decimals (WETH-like)
 
     address public owner = address(0x1);
     address public kingVault = address(0x2);
@@ -28,12 +28,8 @@ contract KingVaultDepositEdgeCaseTest is Test {
         implementation = new KingVaultHarness();
 
         // Deploy proxy
-        bytes memory initData = abi.encodeWithSelector(
-            KingVaultHarness.initialize.selector,
-            owner,
-            kingVault,
-            priceProvider
-        );
+        bytes memory initData =
+            abi.encodeWithSelector(KingVaultHarness.initialize.selector, owner, kingVault, priceProvider);
         ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initData);
         vault = KingVaultHarness(address(proxy));
 
@@ -56,7 +52,7 @@ contract KingVaultDepositEdgeCaseTest is Test {
         vault.registerTokens(tokens, accepted);
 
         // Mint large amounts to kingVault for edge case testing
-        token6.mint(kingVault, type(uint128).max);   // Large but safe amount
+        token6.mint(kingVault, type(uint128).max); // Large but safe amount
         token8.mint(kingVault, type(uint128).max);
         token18.mint(kingVault, type(uint128).max);
 
@@ -80,9 +76,9 @@ contract KingVaultDepositEdgeCaseTest is Test {
         tokens[2] = address(token18);
 
         uint256[] memory amounts = new uint256[](3);
-        amounts[0] = 1_000_000e6;   // 1M USDC (6 decimals)
-        amounts[1] = 50e8;          // 50 WBTC (8 decimals)
-        amounts[2] = 100e18;        // 100 WETH (18 decimals)
+        amounts[0] = 1_000_000e6; // 1M USDC (6 decimals)
+        amounts[1] = 50e8; // 50 WBTC (8 decimals)
+        amounts[2] = 100e18; // 100 WETH (18 decimals)
 
         // Act
         vm.prank(kingVault);
@@ -279,8 +275,8 @@ contract KingVaultDepositEdgeCaseTest is Test {
         tokens[0] = address(token18);
         tokens[1] = address(insufficientToken);
         uint256[] memory amounts = new uint256[](2);
-        amounts[0] = 100e18;     // This should succeed
-        amounts[1] = 100e18;     // This should fail (only 10 available)
+        amounts[0] = 100e18; // This should succeed
+        amounts[1] = 100e18; // This should fail (only 10 available)
 
         // Act & Assert - entire transaction should revert (atomicity)
         vm.prank(kingVault);
