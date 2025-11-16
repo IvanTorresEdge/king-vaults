@@ -5,6 +5,8 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 /**
  * @title IAccountantWithRateProviders
+ * @author King Protocol (https://www.kingprotocol.org)
+ * @custom:security-contact security@kingprotocol.com
  * @notice Interface for Veda Finance BoringVault Accountant contract
  * @dev Provides exchange rates for share pricing and valuation
  * @dev Mainnet address: 0x05A1552c5e18F5A0BB9571b5F2D6a4765ebdA32b (sETHFI Accountant)

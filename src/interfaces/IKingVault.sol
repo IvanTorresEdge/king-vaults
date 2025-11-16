@@ -3,6 +3,8 @@ pragma solidity ^0.8.25;
 
 /**
  * @title IKingVault
+ * @author King Protocol (https://www.kingprotocol.org)
+ * @custom:security-contact security@kingprotocol.com
  * @notice Interface for King Protocol vault implementations
  * @dev Provides standardized interface for all vault types (BoringVault, TokenizedVault, etc.)
  */

@@ -5,6 +5,8 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 /**
  * @title IAtomicQueue
+ * @author King Protocol (https://www.kingprotocol.org)
+ * @custom:security-contact security@kingprotocol.com
  * @notice Interface for Veda Finance AtomicQueue contract
  * @dev Handles asynchronous withdrawal requests via solver fulfillment
  * @dev Mainnet address: 0xD45884B592E316eB816199615A95C182F75dea07

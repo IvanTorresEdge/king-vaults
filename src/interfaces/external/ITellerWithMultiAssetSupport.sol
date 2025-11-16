@@ -5,6 +5,8 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 /**
  * @title ITellerWithMultiAssetSupport
+ * @author King Protocol (https://www.kingprotocol.org)
+ * @custom:security-contact security@kingprotocol.com
  * @notice Interface for Veda Finance BoringVault Teller contract
  * @dev Handles atomic deposits (assets → shares in single transaction)
  * @dev Mainnet address: 0xe2acf9f80a2756E51D1e53F9f41583C84279Fb1f (sETHFI Teller)

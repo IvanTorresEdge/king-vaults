@@ -3,6 +3,8 @@ pragma solidity ^0.8.25;
 
 /**
  * @title IPriceProvider
+ * @author King Protocol (https://www.kingprotocol.org)
+ * @custom:security-contact security@kingprotocol.com
  * @notice Interface for price oracles that provide ETH and USD-denominated asset prices
  * @dev Prices are returned with 18 decimals precision (WAD format: 1e18 = 1.00)
  * @dev This interface is used by King Vaults to calculate TVL in both ETH and USD

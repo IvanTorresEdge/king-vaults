@@ -10,6 +10,8 @@ import {IKingVault} from "../interfaces/IKingVault.sol";
 
 /**
  * @title KingVaultStorage
+ * @author King Protocol (https://www.kingprotocol.org)
+ * @custom:security-contact security@kingprotocol.com
  * @notice Storage layout for King Protocol vault implementations
  * @dev Provides base storage structure for all vault types with UUPS upgradeability
  * @dev Uses simplified storage with separate mappings for gas efficiency (Decision 12 & 13)

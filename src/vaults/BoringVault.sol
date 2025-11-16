@@ -15,6 +15,8 @@ import {IPriceProvider} from "../interfaces/IPriceProvider.sol";
 
 /**
  * @title BoringVault
+ * @author King Protocol (https://www.kingprotocol.org)
+ * @custom:security-contact security@kingprotocol.com
  * @notice King Vault implementation for Veda Finance BoringVault integration
  * @dev Extends KingVault with Veda-specific deposit/withdrawal logic
  * @dev Uses atomic deposits (Teller) and asynchronous withdrawals (AtomicQueue)
@@ -36,8 +38,6 @@ import {IPriceProvider} from "../interfaces/IPriceProvider.sol";
  * 1. deposit(): Transfer asset → BoringVault, deposit to Teller → receive shares
  * 2. withdraw(): Queue request via AtomicQueue → solver fulfills → transfer asset back
  * 3. harvestProfits(): Calculate share appreciation → distribute to recipients
- *
- * @custom:security-contact security@kingprotocol.com
  */
 contract BoringVault is KingVault {
     // ============================================
@@ -496,7 +496,7 @@ contract BoringVault is KingVault {
      * Example:
      * ```solidity
      * // Deploy 1000 ETHFI to BoringVault
-     * uint256 shares = boringVault.depositToVault(ETHFI, 1000e18);
+     * uint256 shares = kingBoringVault.depositToVault(ETHFI, 1000e18);
      * // Shares received based on current exchange rate
      * // _deposits[ETHFI] unchanged (managed by King main vault)
      * ```
@@ -1036,7 +1036,7 @@ contract BoringVault is KingVault {
      * // Vault has 500 shares worth 1200 ETH, principal = 1000 ETH
      * // Profit = 200 ETH = 16.67% of shareValue
      * // Profit shares = 500 × 0.1667 = 83.33 shares
-     * boringVault.harvestProfits();
+     * // kingBoringVault.harvestProfits();
      * // Queues 83.33 share withdrawal for ~200 WETH
      * // _queuedProfits[WETH] = 200e18
      * // _deposits[WETH] UNCHANGED (profit ≠ principal)
@@ -1171,7 +1171,7 @@ contract BoringVault is KingVault {
      * // - 200 WETH arrived as idle balance
      * // - _queuedProfits[WETH] = 200e18 (still tracked)
      *
-     * boringVault.distributeProfits();
+     * // kingBoringVault.distributeProfits();
      * // - Parent sends 200 WETH to recipients
      * // - _queuedProfits[WETH] = 0 (cleared)
      * // - Ready for next harvest cycle
@@ -1298,7 +1298,7 @@ contract BoringVault is KingVault {
      * // _deposits[WETH] = 1000e18 (unchanged)
      *
      * // Solver never fulfills, governance cancels:
-     * boringVault.cancelProfitsHarvest(WETH);
+     * kingBoringVault.cancelProfitsHarvest(WETH);
      *
      * // - _queuedProfits[WETH] = 0 (cleared)
      * // - _deposits[WETH] = 1000e18 (still unchanged)
@@ -1364,7 +1364,7 @@ contract BoringVault is KingVault {
      * Example Usage:
      * ```solidity
      * // Increase slippage tolerance to 1%
-     * boringVault.setMaxSlippage(100);
+     * kingBoringVault.setMaxSlippage(100);
      * ```
      */
     function setMaxSlippage(uint16 _slippageBPS) external onlyOwner whenNotPaused {
@@ -1400,7 +1400,7 @@ contract BoringVault is KingVault {
      * ```solidity
      * // Update to new AtomicQueue deployment
      * address newQueue = 0x1234...5678;
-     * boringVault.setAtomicQueue(newQueue);
+     * kingBoringVault.setAtomicQueue(newQueue);
      * ```
      */
     function setAtomicQueue(address _atomicQueue) external onlyOwner whenNotPaused {
@@ -1439,10 +1439,10 @@ contract BoringVault is KingVault {
      * Example Usage:
      * ```solidity
      * // Extend default duration to 14 days
-     * boringVault.setWithdrawalDuration(14 days);
+     * kingBoringVault.setWithdrawalDuration(14 days);
      *
      * // Reduce to 3 days for faster settlements
-     * boringVault.setWithdrawalDuration(3 days);
+     * kingBoringVault.setWithdrawalDuration(3 days);
      * ```
      */
     function setWithdrawalDuration(uint64 _duration) external onlyOwner whenNotPaused {
@@ -1467,7 +1467,7 @@ contract BoringVault is KingVault {
      *
      * Example Usage:
      * ```solidity
-     * uint256 pending = boringVault.getPendingShares();
+     * uint256 pending = kingBoringVault.getPendingShares();
      * // Returns: 83e18 (83 shares queued for withdrawal)
      * ```
      */
@@ -1482,8 +1482,8 @@ contract BoringVault is KingVault {
      *
      * Example Usage:
      * ```solidity
-     * uint256 totalShares = boringVault.getVaultShares();
-     * uint256 availableShares = totalShares - boringVault.getPendingShares();
+     * uint256 totalShares = kingBoringVault.getVaultShares();
+     * uint256 availableShares = totalShares - kingBoringVault.getPendingShares();
      * ```
      */
     function getVaultShares() external view returns (uint256) {
@@ -1498,7 +1498,7 @@ contract BoringVault is KingVault {
      *
      * Example Usage:
      * ```solidity
-     * WithdrawalRequest memory request = boringVault.getWithdrawalRequest(WETH);
+     * WithdrawalRequest memory request = kingBoringVault.getWithdrawalRequest(WETH);
      * if (request.deadline > 0) {
      *     // Active withdrawal exists
      *     console.log("Expecting", request.offer, "WETH");
