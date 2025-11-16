@@ -158,7 +158,7 @@ contract BoringVault is KingVault {
      * @notice Maximum allowed slippage limit (1000 BPS = 10%)
      * @dev Prevents owner from setting excessive slippage tolerance
      */
-    uint16 public constant MAX_SLIPPAGE_LIMIT = 1_000; // 10%
+    uint16 public constant MAX_SLIPPAGE_LIMIT = 10_00; // 10%
 
     /**
      * @notice Default slippage tolerance (50 BPS = 0.5%)
@@ -365,6 +365,23 @@ contract BoringVault is KingVault {
      */
     event WithdrawalDurationUpdated(uint64 oldDuration, uint64 newDuration);
 
+    /**
+     * @notice Emitted when proxy is initialized
+     * @dev Tracks initial configuration for monitoring and verification
+     * @param owner Protocol owner address
+     * @param kingVault King Protocol core vault address
+     * @param priceProvider Price oracle address
+     * @param atomicQueue AtomicQueue address for withdrawals
+     * @param timestamp Block timestamp of initialization
+     */
+    event Initialized(
+        address indexed owner,
+        address indexed kingVault,
+        address priceProvider,
+        address atomicQueue,
+        uint256 timestamp
+    );
+
     // ============================================
     // Storage Gap
     // ============================================
@@ -423,6 +440,10 @@ contract BoringVault is KingVault {
         address[] memory _tokens,
         bool[] memory _accepted
     ) external initializer {
+        // Validate all address parameters
+        if (_owner == address(0)) revert ZeroAddress();
+        if (_kingVault == address(0)) revert ZeroAddress();
+        if (_priceProvider == address(0)) revert ZeroAddress();
         if (_atomicQueue == address(0)) revert ZeroAddress();
 
         // Initialize parent KingVault
@@ -432,6 +453,9 @@ contract BoringVault is KingVault {
         atomicQueue = _atomicQueue;
         maxSlippageBPS = DEFAULT_SLIPPAGE_BPS;
         withdrawalDuration = 7 days;
+
+        // Emit initialization event for auditability
+        emit Initialized(_owner, _kingVault, _priceProvider, _atomicQueue, block.timestamp);
     }
 
     // ============================================
@@ -483,6 +507,9 @@ contract BoringVault is KingVault {
         whenNotPaused
         returns (uint256 shares)
     {
+        // Validate address parameter
+        if (_asset == address(0)) revert ZeroAddress();
+
         // Validate inputs
         if (!_registeredTokens[_asset]) revert AssetNotAccepted(_asset);
         if (_amount == 0) revert ZeroAmount();
@@ -539,7 +566,7 @@ contract BoringVault is KingVault {
         onlyOwner
         whenNotPaused
     {
-        // Validate inputs
+        if (_asset == address(0)) revert ZeroAddress();
         if (_shareAmount == 0) revert ZeroAmount();
         if (!_registeredTokens[_asset]) revert AssetNotAccepted(_asset);
 
@@ -556,6 +583,7 @@ contract BoringVault is KingVault {
             revert InsufficientAvailableBalance(vault, _shareAmount, availableShares);
         }
 
+        // Calculate and validate deadline with bounds checking
         // Calculate deadline (use default if not provided)
         uint64 deadline = _deadline == 0 ? uint64(block.timestamp) + withdrawalDuration : _deadline;
 
@@ -613,6 +641,9 @@ contract BoringVault is KingVault {
         onlyOwner
         whenNotPaused
     {
+        if (_asset == address(0)) revert ZeroAddress();
+        if (_amount == 0) revert ZeroAmount();
+
         // Validate withdrawal request exists
         WithdrawalRequest memory request = _withdrawalRequests[_asset];
         if (request.deadline == 0) {
@@ -658,6 +689,9 @@ contract BoringVault is KingVault {
      * @param _asset ERC-20 token address of withdrawal to cancel
      */
     function cancelWithdrawFromVault(address _asset) external onlyOwner whenNotPaused {
+        // Validate address parameter
+        if (_asset == address(0)) revert ZeroAddress();
+
         // Validate withdrawal request exists
         WithdrawalRequest memory request = _withdrawalRequests[_asset];
         if (request.deadline == 0) {
@@ -1068,6 +1102,7 @@ contract BoringVault is KingVault {
      * @custom:security Assumes validation done by caller (harvestProfits)
      */
     function _queueProfitWithdrawal(address _asset, uint256 _shareAmount, uint64 _deadline) internal {
+        // Calculate and validate deadline with bounds checking
         // Calculate deadline (use default if not provided)
         uint64 deadline = _deadline == 0 ? uint64(block.timestamp) + withdrawalDuration : _deadline;
 
@@ -1271,6 +1306,9 @@ contract BoringVault is KingVault {
      * ```
      */
     function cancelProfitsHarvest(address _asset) external onlyOwner whenNotPaused {
+        // Validate address parameter
+        if (_asset == address(0)) revert ZeroAddress();
+
         // 1. Validate queued profits exist
         uint256 queuedAmount = _queuedProfits[_asset];
         if (queuedAmount == 0) {

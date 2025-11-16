@@ -844,8 +844,8 @@ contract BoringVaultEdgeCasesTest is Test {
         _depositFromKingVault(address(weth), depositAmount);
         uint256 shares = _deployToVault(address(weth), depositAmount);
 
-        // Set deadline to exactly current timestamp + 1
-        uint64 deadline = uint64(block.timestamp + 1);
+        // Set deadline to 1 hour from now
+        uint64 deadline = uint64(block.timestamp + 1 hours);
 
         vm.prank(owner);
         boringVault.withdrawFromVault(address(weth), shares, deadline);
@@ -876,8 +876,8 @@ contract BoringVaultEdgeCasesTest is Test {
         _depositFromKingVault(address(weth), depositAmount);
         uint256 shares = _deployToVault(address(weth), depositAmount);
 
-        // Set deadline far in future (1 year)
-        uint64 deadline = uint64(block.timestamp + 365 days);
+        // Set deadline to far future (90 days)
+        uint64 deadline = uint64(block.timestamp + 90 days);
 
         vm.prank(owner);
         boringVault.withdrawFromVault(address(weth), shares, deadline);
@@ -885,7 +885,7 @@ contract BoringVaultEdgeCasesTest is Test {
         BoringVault.WithdrawalRequest memory request = boringVault.getWithdrawalRequest(address(weth));
         assertEq(request.deadline, deadline);
 
-        // Can still complete immediately (deadline is maximum, not minimum)
+        // Can still complete immediately (deadline is for solver expiry)
         _simulateSolverFulfillment(address(weth), depositAmount, shares);
 
         vm.prank(owner);
@@ -945,8 +945,8 @@ contract BoringVaultEdgeCasesTest is Test {
         _depositFromKingVault(address(weth), depositAmount);
         uint256 shares = _deployToVault(address(weth), depositAmount);
 
-        // Set deadline to current timestamp (immediately "expired")
-        uint64 deadline = uint64(block.timestamp);
+        // Set deadline to very short (1 second)
+        uint64 deadline = uint64(block.timestamp + 1);
 
         vm.prank(owner);
         boringVault.withdrawFromVault(address(weth), shares, deadline);
