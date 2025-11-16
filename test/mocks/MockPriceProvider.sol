@@ -12,8 +12,8 @@ contract MockPriceProvider is IPriceProvider {
     /// @notice Mapping of asset address => price in ETH (18 decimals)
     mapping(address => uint256) private _pricesInEth;
 
-    /// @notice Mapping of asset address => price availability
-    mapping(address => bool) private _priceAvailable;
+    /// @notice Mapping of asset address => whether price is set
+    mapping(address => bool) private _priceSet;
 
     /// @notice Current ETH/USD price (18 decimals)
     uint256 private _ethUsdPrice;
@@ -36,7 +36,7 @@ contract MockPriceProvider is IPriceProvider {
      */
     function setPrice(address asset, uint256 priceInEth) external {
         _pricesInEth[asset] = priceInEth;
-        _priceAvailable[asset] = true;
+        _priceSet[asset] = true;
     }
 
     /**
@@ -48,7 +48,7 @@ contract MockPriceProvider is IPriceProvider {
         require(assets.length == pricesInEth.length, "MockPriceProvider: Length mismatch");
         for (uint256 i = 0; i < assets.length; i++) {
             _pricesInEth[assets[i]] = pricesInEth[i];
-            _priceAvailable[assets[i]] = true;
+            _priceSet[assets[i]] = true;
         }
     }
 
@@ -58,7 +58,7 @@ contract MockPriceProvider is IPriceProvider {
      * @param available Whether price is available
      */
     function setPriceAvailability(address asset, bool available) external {
-        _priceAvailable[asset] = available;
+        _priceSet[asset] = available;
     }
 
     /**
@@ -73,6 +73,7 @@ contract MockPriceProvider is IPriceProvider {
      * @inheritdoc IPriceProvider
      */
     function getPriceInEth(address asset) external view override returns (uint256 priceInEth) {
+        require(_priceSet[asset], "MockPriceProvider: Price not set");
         return _pricesInEth[asset];
     }
 
@@ -81,12 +82,5 @@ contract MockPriceProvider is IPriceProvider {
      */
     function getEthUsdPrice() external view override returns (uint256 ethUsdPrice, uint256 decimals) {
         return (_ethUsdPrice, _ethUsdDecimals);
-    }
-
-    /**
-     * @inheritdoc IPriceProvider
-     */
-    function isPriceAvailable(address asset) external view override returns (bool available) {
-        return _priceAvailable[asset] && _pricesInEth[asset] > 0;
     }
 }

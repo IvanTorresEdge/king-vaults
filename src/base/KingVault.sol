@@ -464,8 +464,12 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
             // Validate asset address
             if (token == address(0)) revert ZeroAddress();
 
-            // Validate asset has price available (ensures it's a valid asset)
-            if (!IPriceProvider(priceProvider).isPriceAvailable(token)) {
+            // Validate asset is registered in price provider by attempting to get price
+            // If getPriceInEth reverts, the token is not registered
+            try IPriceProvider(priceProvider).getPriceInEth(token) returns (uint256) {
+                // Token is registered, continue
+            } catch {
+                // Token is not registered in price provider
                 revert AssetNotAccepted(token);
             }
 
@@ -567,14 +571,15 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
                 continue;
             }
 
-            // CRITICAL: Price must be available for ALL registered tokens with deposits
-            // We revert rather than skip to prevent understated TVL
-            if (!provider.isPriceAvailable(token)) {
+            // Get price in ETH
+            // CRITICAL: If this reverts, token is not registered in price provider
+            // We catch and revert with PriceNotAvailable to prevent understated TVL
+            uint256 priceInEth;
+            try provider.getPriceInEth(token) returns (uint256 price) {
+                priceInEth = price;
+            } catch {
                 revert PriceNotAvailable(token);
             }
-
-            // Get price in ETH
-            uint256 priceInEth = provider.getPriceInEth(token);
 
             // CRITICAL: Price must be non-zero for accurate TVL
             // We revert rather than skip to prevent understated TVL

@@ -54,7 +54,49 @@ King Vaults implements defense-in-depth security practices:
 - [Tech Stack](./product/tech-stack.md) - Architecture and technical decisions
 - [Foundry Book](https://book.getfoundry.sh/) - Development framework documentation
 
-## Usage
+## Deployment
+
+King Vaults uses a secure, hardware-wallet-friendly deployment automation system. See the [Deployment Guide](./docs/deployment-guide.md) for complete instructions.
+
+### Quick Start
+
+1. **Configure vaults** in `config/vaults.toml`:
+   ```toml
+   [[vaults]]
+   id = "boring-vault-sethfi"
+   network = 1  # Ethereum Mainnet
+   # ... set all addresses
+   ```
+
+2. **Simulate deployment** (dry run):
+   ```shell
+   forge script script/DeployKingBoringVault.s.sol \
+     --sig "deploy(string)" "boring-vault-sethfi"
+   ```
+
+3. **Deploy with Ledger** (mainnet):
+   ```shell
+   forge script script/DeployKingBoringVault.s.sol \
+     --sig "deploy(string)" "boring-vault-sethfi" \
+     --ledger --broadcast --verify
+   ```
+
+4. **Deploy with named account** (testnet):
+   ```shell
+   forge script script/DeployKingBoringVault.s.sol \
+     --sig "deploy(string)" "boring-vault-sethfi" \
+     --account deployer --broadcast --verify
+   ```
+
+### Key Features
+
+- **Zero private key exposure** - Uses Ledger or Foundry keystore only
+- **Simulation mode** - Test deployments before broadcasting
+- **TOML configuration** - Manage multiple vaults in one file
+- **Profit distribution** - Automatically configured during deployment
+- **Etherscan verification** - Built-in contract verification
+
+## Development
 
 ### Build
 

@@ -14,7 +14,7 @@ interface IPriceProvider {
      * @notice Get the ETH price of an asset
      * @param asset The address of the asset (ERC20 token or ETH)
      * @return priceInEth The price in ETH with 18 decimals (e.g., 0.05e18 = 0.05 ETH)
-     * @dev Returns 0 if price is unavailable
+     * @dev Reverts if token is not registered in the price provider
      * @dev For ETH, should return 1e18 (1 ETH = 1 ETH)
      */
     function getPriceInEth(address asset) external view returns (uint256 priceInEth);
@@ -26,12 +26,4 @@ interface IPriceProvider {
      * @dev Example: If ETH = $2000, returns (2000e18, 18)
      */
     function getEthUsdPrice() external view returns (uint256 ethUsdPrice, uint256 decimals);
-
-    /**
-     * @notice Check if price data is available for an asset
-     * @param asset The address of the asset
-     * @return available True if price data exists and is valid
-     * @dev Returns false if price is 0 or stale
-     */
-    function isPriceAvailable(address asset) external view returns (bool available);
 }

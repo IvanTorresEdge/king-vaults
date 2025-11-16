@@ -80,3 +80,4 @@ site/
 # Deployment artifacts
 deployments/localhost/
 deployments/hardhat/
+storage-layout-*.txt

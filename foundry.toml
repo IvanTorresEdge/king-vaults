@@ -33,6 +33,15 @@ via_ir = true
 bytecode_hash = "none"
 cbor_metadata = false
 
+# File system permissions for deployment scripts
+fs_permissions = [
+    { access = "read", path = "./config" },
+    { access = "write", path = "./" }
+]
+
+# FFI permissions for storage layout generation in upgrade scripts
+ffi = true
+
 [profile.ci]
 fuzz = { runs = 10000 }
 invariant = { runs = 1000 }
