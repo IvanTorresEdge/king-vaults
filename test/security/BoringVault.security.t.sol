@@ -8,6 +8,7 @@ import {BoringVault} from "../../src/vaults/BoringVault.sol";
 import {MockERC20} from "../mocks/MockERC20.sol";
 import {MockPriceProvider} from "../mocks/MockPriceProvider.sol";
 import {IKingVault} from "../../src/interfaces/IKingVault.sol";
+import {IAtomicQueue} from "../../src/interfaces/external/IAtomicQueue.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /**
@@ -1103,5 +1104,258 @@ contract MockAtomicQueue {
         returns (AtomicRequest memory)
     {
         return requests[user][address(offer)][address(want)];
+    }
+}
+
+// ============================================
+// Malicious Contracts for Reentrancy Attack Tests
+// ============================================
+
+/**
+ * @notice Malicious AtomicQueue contract that attempts reentrancy during updateAtomicRequest()
+ * @dev Simulates a compromised or malicious AtomicQueue trying to reenter vulnerable functions
+ */
+contract MaliciousAtomicQueue {
+    address public targetVault;
+    bool public attackExecuted;
+    uint8 public attackType; // 1=cancelProfitsHarvest, 2=cancelWithdrawFromVault, 3=withdrawFromVault, 4=depositToVault
+    address public attackAsset;
+
+    // Track request for getUserAtomicRequest
+    mapping(address => mapping(address => mapping(address => IAtomicQueue.AtomicRequest))) public requests;
+
+    constructor(address _targetVault) {
+        targetVault = _targetVault;
+    }
+
+    function setAttackType(uint8 _type, address _asset) external {
+        attackType = _type;
+        attackAsset = _asset;
+        attackExecuted = false;
+    }
+
+    /**
+     * @notice Malicious updateAtomicRequest that attempts reentrancy
+     * @dev This is where the reentrancy attack happens during cancellation/withdrawal
+     */
+    function updateAtomicRequest(MockERC20 offer, MockERC20 want, IAtomicQueue.AtomicRequest calldata request) external {
+        // Store the request for getUserAtomicRequest queries
+        requests[msg.sender][address(offer)][address(want)] = request;
+
+        // Attempt reentrancy if not already executed
+        if (!attackExecuted && attackType > 0) {
+            attackExecuted = true;
+
+            if (attackType == 1) {
+                // Attack 1: Reenter cancelProfitsHarvest during its external call
+                try BoringVault(targetVault).cancelProfitsHarvest(attackAsset) {
+                    // Should fail due to CEI pattern
+                } catch {}
+            } else if (attackType == 2) {
+                // Attack 2: Reenter cancelWithdrawFromVault during its external call
+                try BoringVault(targetVault).cancelWithdrawFromVault(attackAsset) {
+                    // Should fail due to CEI pattern
+                } catch {}
+            } else if (attackType == 3) {
+                // Attack 3: Reenter withdrawFromVault during its external call
+                try BoringVault(targetVault).withdrawFromVault(attackAsset, 100e18, 0) {
+                    // Should fail due to CEI pattern
+                } catch {}
+            } else if (attackType == 4) {
+                // Attack 4: Reenter depositToVault during external call
+                try BoringVault(targetVault).depositToVault(attackAsset, 100e18) {
+                    // Should fail due to CEI pattern
+                } catch {}
+            }
+        }
+    }
+
+    function getUserAtomicRequest(address user, MockERC20 offer, MockERC20 want)
+        external
+        view
+        returns (IAtomicQueue.AtomicRequest memory)
+    {
+        return requests[user][address(offer)][address(want)];
+    }
+}
+
+/**
+ * @notice Malicious ERC20 token that attempts reentrancy during transfer callbacks
+ * @dev Simulates a malicious token trying to exploit transfer operations
+ */
+contract MaliciousERC20 is MockERC20 {
+    address public targetVault;
+    bool public attackExecuted;
+    uint8 public attackType;
+
+    constructor(string memory name, string memory symbol) MockERC20(name, symbol, 18) {}
+
+    function setTarget(address _targetVault) external {
+        targetVault = _targetVault;
+    }
+
+    function setAttackType(uint8 _type) external {
+        attackType = _type;
+        attackExecuted = false;
+    }
+
+    /**
+     * @notice Malicious transfer that attempts reentrancy
+     * @dev Overrides transfer to inject attack logic
+     */
+    function transfer(address to, uint256 amount) public override returns (bool) {
+        // Execute parent transfer first
+        bool success = super.transfer(to, amount);
+
+        // Attempt reentrancy if conditions met
+        if (success && !attackExecuted && attackType > 0 && targetVault != address(0)) {
+            attackExecuted = true;
+
+            if (attackType == 1) {
+                // Attack: Try to withdraw again during withdrawal
+                address[] memory tokens = new address[](1);
+                tokens[0] = address(this);
+                uint256[] memory amounts = new uint256[](1);
+                amounts[0] = 50e18;
+
+                try BoringVault(targetVault).withdraw(tokens, amounts, msg.sender) {
+                    // Should fail
+                } catch {}
+            } else if (attackType == 2) {
+                // Attack: Try to deposit during withdrawal
+                address[] memory tokens = new address[](1);
+                tokens[0] = address(this);
+                uint256[] memory amounts = new uint256[](1);
+                amounts[0] = 50e18;
+
+                try BoringVault(targetVault).deposit(tokens, amounts) {
+                    // Should fail
+                } catch {}
+            }
+        }
+
+        return success;
+    }
+
+    /**
+     * @notice Malicious transferFrom that attempts reentrancy
+     */
+    function transferFrom(address from, address to, uint256 amount) public override returns (bool) {
+        bool success = super.transferFrom(from, to, amount);
+
+        // Similar reentrancy logic as transfer
+        if (success && !attackExecuted && attackType > 0 && targetVault != address(0)) {
+            attackExecuted = true;
+
+            if (attackType == 3) {
+                // Attack: Try to emergency withdraw during deposit
+                try BoringVault(targetVault).emergencyWithdraw() {
+                    // Should fail if paused or access control works
+                } catch {}
+            }
+        }
+
+        return success;
+    }
+}
+
+/**
+ * @notice Malicious Teller contract that attempts reentrancy during deposit
+ * @dev Simulates a compromised Teller trying to exploit depositToVault
+ */
+contract MaliciousTeller {
+    address public vault;
+    address public targetBoringVault;
+    bool public attackExecuted;
+
+    constructor(address _vault) {
+        vault = _vault;
+    }
+
+    function setTarget(address _target) external {
+        targetBoringVault = _target;
+    }
+
+    /**
+     * @notice Malicious deposit that attempts reentrancy
+     */
+    function deposit(MockERC20 depositAsset, uint256 depositAmount, uint256)
+        external
+        returns (uint256 shares)
+    {
+        // Calculate shares (1:1 for simplicity)
+        shares = depositAmount;
+
+        // Transfer asset from caller
+        depositAsset.transferFrom(msg.sender, address(this), depositAmount);
+
+        // Mint shares to caller
+        MockERC20(vault).mint(msg.sender, shares);
+
+        // Attempt reentrancy during deposit operation
+        if (!attackExecuted && targetBoringVault != address(0)) {
+            attackExecuted = true;
+
+            // Try to call depositToVault again (double-spend attack)
+            try BoringVault(targetBoringVault).depositToVault(address(depositAsset), depositAmount / 2) {
+                // Should fail due to insufficient balance or CEI pattern
+            } catch {}
+        }
+
+        return shares;
+    }
+
+    function isPaused() external pure returns (bool) {
+        return false;
+    }
+}
+
+/**
+ * @notice Malicious receiver contract that attempts reentrancy during token receipt
+ */
+contract MaliciousReceiver {
+    address public targetVault;
+    bool public attackExecuted;
+    uint8 public attackType;
+
+    constructor(address _targetVault) {
+        targetVault = _targetVault;
+    }
+
+    function setAttackType(uint8 _type) external {
+        attackType = _type;
+        attackExecuted = false;
+    }
+
+    // Fallback to receive tokens and attempt reentrancy
+    fallback() external payable {
+        _attemptAttack();
+    }
+
+    receive() external payable {
+        _attemptAttack();
+    }
+
+    function _attemptAttack() internal {
+        if (!attackExecuted && attackType > 0) {
+            attackExecuted = true;
+
+            if (attackType == 1) {
+                // Try to withdraw again
+                address[] memory tokens = new address[](1);
+                tokens[0] = address(0); // Will fail but tests reentrancy guard
+                uint256[] memory amounts = new uint256[](1);
+                amounts[0] = 1;
+
+                try BoringVault(targetVault).withdraw(tokens, amounts, address(this)) {
+                    // Should fail
+                } catch {}
+            } else if (attackType == 2) {
+                // Try to complete another withdrawal
+                try BoringVault(targetVault).completePrincipalWithdraw(address(0), 1, address(this)) {
+                    // Should fail
+                } catch {}
+            }
+        }
     }
 }
