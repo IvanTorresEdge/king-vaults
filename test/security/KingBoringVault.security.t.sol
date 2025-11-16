@@ -4,7 +4,7 @@ pragma solidity ^0.8.25;
 import {Test} from "forge-std/Test.sol";
 import {console2} from "forge-std/console2.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import {BoringVault} from "../../src/vaults/BoringVault.sol";
+import {KingBoringVault} from "../../src/vaults/KingBoringVault.sol";
 import {MockERC20} from "../mocks/MockERC20.sol";
 import {MockPriceProvider} from "../mocks/MockPriceProvider.sol";
 import {IKingVault} from "../../src/interfaces/IKingVault.sol";
@@ -12,7 +12,7 @@ import {IAtomicQueue} from "../../src/interfaces/external/IAtomicQueue.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /**
- * @title BoringVaultSecurityTest
+ * @title KingBoringVaultSecurityTest
  * @notice Comprehensive security tests for BoringVault dual tracking and access control
  * @dev Tests Task 7.7 acceptance criteria:
  *      - All access control modifiers (onlyOwner, onlyKingVault, onlyOwnerOrKingVault)
@@ -27,13 +27,13 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
  *      - Withdrawal request manipulation attempts
  *      - Unauthorized profit extraction prevention
  */
-contract BoringVaultSecurityTest is Test {
+contract KingBoringVaultSecurityTest is Test {
     // ============================================
     // Contracts
     // ============================================
 
-    BoringVault public boringVault;
-    BoringVault public implementation;
+    KingBoringVault public boringVault;
+    KingBoringVault public implementation;
     MockERC20 public weth;
     MockERC20 public ethfi;
     MockPriceProvider public priceProvider;
@@ -98,10 +98,10 @@ contract BoringVaultSecurityTest is Test {
         accountant.setRate(1.0e18);
 
         // Deploy BoringVault implementation
-        implementation = new BoringVault(address(vaultToken), address(teller), address(accountant));
+        implementation = new KingBoringVault(address(vaultToken), address(teller), address(accountant));
 
         // Deploy and initialize proxy
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
 
         // Setup profit distribution (60% DAO, 40% Treasury)
         _setupProfitDistribution();
@@ -111,22 +111,22 @@ contract BoringVaultSecurityTest is Test {
     // Helper Functions
     // ============================================
 
-    function _deployBoringVault(
+    function _deployKingBoringVault(
         address _owner,
         address _kingVault,
         address _priceProvider,
         address _atomicQueue,
         address[] memory _tokens,
         bool[] memory _accepted
-    ) internal returns (BoringVault) {
+    ) internal returns (KingBoringVault) {
         bytes memory initData = abi.encodeWithSelector(
-            BoringVault.initialize.selector, _owner, _kingVault, _priceProvider, _atomicQueue, _tokens, _accepted
+            KingBoringVault.initialize.selector, _owner, _kingVault, _priceProvider, _atomicQueue, _tokens, _accepted
         );
         ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initData);
-        return BoringVault(address(proxy));
+        return KingBoringVault(address(proxy));
     }
 
-    function _deployStandardBoringVault() internal returns (BoringVault) {
+    function _deployStandardKingBoringVault() internal returns (KingBoringVault) {
         address[] memory tokens = new address[](2);
         tokens[0] = address(weth);
         tokens[1] = address(ethfi);
@@ -134,7 +134,7 @@ contract BoringVaultSecurityTest is Test {
         accepted[0] = true;
         accepted[1] = true;
 
-        return _deployBoringVault(owner, kingVault, address(priceProvider), address(atomicQueue), tokens, accepted);
+        return _deployKingBoringVault(owner, kingVault, address(priceProvider), address(atomicQueue), tokens, accepted);
     }
 
     function _setupProfitDistribution() internal {
@@ -546,7 +546,7 @@ contract BoringVaultSecurityTest is Test {
 
         // Owner tries to complete withdrawal without queuing
         vm.prank(owner);
-        vm.expectRevert(BoringVault.WithdrawalNotQueued.selector);
+        vm.expectRevert(KingBoringVault.WithdrawalNotQueued.selector);
         boringVault.completePrincipalWithdraw(address(weth), 500e18, owner);
     }
 
@@ -571,7 +571,7 @@ contract BoringVaultSecurityTest is Test {
 
         // Attempt to queue second withdrawal for same asset
         vm.prank(owner);
-        vm.expectRevert(BoringVault.WithdrawalNotQueued.selector);
+        vm.expectRevert(KingBoringVault.WithdrawalNotQueued.selector);
         boringVault.withdrawFromVault(address(weth), shares / 4, 0);
     }
 
@@ -597,7 +597,7 @@ contract BoringVaultSecurityTest is Test {
 
     function testSecurity_WithdrawalRequest_CannotCancelNonExistentRequest_Reverts() public {
         vm.prank(owner);
-        vm.expectRevert(BoringVault.NoWithdrawalQueued.selector);
+        vm.expectRevert(KingBoringVault.NoWithdrawalQueued.selector);
         boringVault.cancelWithdrawFromVault(address(weth));
     }
 
@@ -655,7 +655,7 @@ contract BoringVaultSecurityTest is Test {
 
         // Attempt to harvest when no profit
         vm.prank(owner);
-        vm.expectRevert(BoringVault.NoProfitToHarvest.selector);
+        vm.expectRevert(KingBoringVault.NoProfitToHarvest.selector);
         boringVault.harvestProfits();
     }
 
@@ -740,7 +740,7 @@ contract BoringVaultSecurityTest is Test {
 
     function testSecurity_Upgrade_OnlyOwnerCanUpgrade_Succeeds() public {
         // Deploy new implementation
-        BoringVault newImpl = new BoringVault(address(vaultToken), address(teller), address(accountant));
+        KingBoringVault newImpl = new KingBoringVault(address(vaultToken), address(teller), address(accountant));
 
         // Owner can upgrade
         vm.prank(owner);
@@ -786,7 +786,7 @@ contract BoringVaultSecurityTest is Test {
 
         // Deploy a new proxy with proper initialization
         bytes memory initData = abi.encodeWithSelector(
-            BoringVault.initialize.selector,
+            KingBoringVault.initialize.selector,
             owner, // legitimate owner
             kingVault,
             address(priceProvider),
@@ -799,7 +799,7 @@ contract BoringVaultSecurityTest is Test {
         // Attacker cannot reinitialize
         vm.prank(attacker);
         vm.expectRevert();
-        BoringVault(address(newProxy)).initialize(
+        KingBoringVault(address(newProxy)).initialize(
             attacker, attacker, address(priceProvider), address(atomicQueue), tokens, accepted
         );
     }
@@ -920,7 +920,7 @@ contract BoringVaultSecurityTest is Test {
      */
     function testSecurity_Configuration_CannotSetExcessiveSlippage_Reverts() public {
         vm.prank(owner);
-        vm.expectRevert(abi.encodeWithSelector(BoringVault.SlippageExceedsLimit.selector, 10_01, 10_00));
+        vm.expectRevert(abi.encodeWithSelector(KingBoringVault.SlippageExceedsLimit.selector, 10_01, 10_00));
         boringVault.setMaxSlippage(10_01); // 10.01% exceeds 10% limit
     }
 
@@ -942,7 +942,7 @@ contract BoringVaultSecurityTest is Test {
 
         // Attempt to change atomic queue with pending withdrawal
         vm.prank(owner);
-        vm.expectRevert(BoringVault.NoWithdrawalQueued.selector);
+        vm.expectRevert(KingBoringVault.NoWithdrawalQueued.selector);
         boringVault.setAtomicQueue(address(0x123));
     }
 
@@ -1148,22 +1148,22 @@ contract MaliciousAtomicQueue {
 
             if (attackType == 1) {
                 // Attack 1: Reenter cancelProfitsHarvest during its external call
-                try BoringVault(targetVault).cancelProfitsHarvest(attackAsset) {
+                try KingBoringVault(targetVault).cancelProfitsHarvest(attackAsset) {
                     // Should fail due to CEI pattern
                 } catch {}
             } else if (attackType == 2) {
                 // Attack 2: Reenter cancelWithdrawFromVault during its external call
-                try BoringVault(targetVault).cancelWithdrawFromVault(attackAsset) {
+                try KingBoringVault(targetVault).cancelWithdrawFromVault(attackAsset) {
                     // Should fail due to CEI pattern
                 } catch {}
             } else if (attackType == 3) {
                 // Attack 3: Reenter withdrawFromVault during its external call
-                try BoringVault(targetVault).withdrawFromVault(attackAsset, 100e18, 0) {
+                try KingBoringVault(targetVault).withdrawFromVault(attackAsset, 100e18, 0) {
                     // Should fail due to CEI pattern
                 } catch {}
             } else if (attackType == 4) {
                 // Attack 4: Reenter depositToVault during external call
-                try BoringVault(targetVault).depositToVault(attackAsset, 100e18) {
+                try KingBoringVault(targetVault).depositToVault(attackAsset, 100e18) {
                     // Should fail due to CEI pattern
                 } catch {}
             }
@@ -1218,7 +1218,7 @@ contract MaliciousERC20 is MockERC20 {
                 uint256[] memory amounts = new uint256[](1);
                 amounts[0] = 50e18;
 
-                try BoringVault(targetVault).withdraw(tokens, amounts, msg.sender) {
+                try KingBoringVault(targetVault).withdraw(tokens, amounts, msg.sender) {
                     // Should fail
                 } catch {}
             } else if (attackType == 2) {
@@ -1228,7 +1228,7 @@ contract MaliciousERC20 is MockERC20 {
                 uint256[] memory amounts = new uint256[](1);
                 amounts[0] = 50e18;
 
-                try BoringVault(targetVault).deposit(tokens, amounts) {
+                try KingBoringVault(targetVault).deposit(tokens, amounts) {
                     // Should fail
                 } catch {}
             }
@@ -1249,7 +1249,7 @@ contract MaliciousERC20 is MockERC20 {
 
             if (attackType == 3) {
                 // Attack: Try to emergency withdraw during deposit
-                try BoringVault(targetVault).emergencyWithdraw() {
+                try KingBoringVault(targetVault).emergencyWithdraw() {
                     // Should fail if paused or access control works
                 } catch {}
             }
@@ -1297,7 +1297,7 @@ contract MaliciousTeller {
             attackExecuted = true;
 
             // Try to call depositToVault again (double-spend attack)
-            try BoringVault(targetBoringVault).depositToVault(address(depositAsset), depositAmount / 2) {
+            try KingBoringVault(targetBoringVault).depositToVault(address(depositAsset), depositAmount / 2) {
                 // Should fail due to insufficient balance or CEI pattern
             } catch {}
         }
@@ -1347,12 +1347,12 @@ contract MaliciousReceiver {
                 uint256[] memory amounts = new uint256[](1);
                 amounts[0] = 1;
 
-                try BoringVault(targetVault).withdraw(tokens, amounts, address(this)) {
+                try KingBoringVault(targetVault).withdraw(tokens, amounts, address(this)) {
                     // Should fail
                 } catch {}
             } else if (attackType == 2) {
                 // Try to complete another withdrawal
-                try BoringVault(targetVault).completePrincipalWithdraw(address(0), 1, address(this)) {
+                try KingBoringVault(targetVault).completePrincipalWithdraw(address(0), 1, address(this)) {
                     // Should fail
                 } catch {}
             }

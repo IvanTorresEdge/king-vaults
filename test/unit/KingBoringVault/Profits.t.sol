@@ -4,7 +4,7 @@ pragma solidity ^0.8.25;
 import {Test} from "forge-std/Test.sol";
 import {console2} from "forge-std/console2.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import {BoringVault} from "../../../src/vaults/BoringVault.sol";
+import {KingBoringVault} from "../../../src/vaults/KingBoringVault.sol";
 import {MockERC20} from "../../mocks/MockERC20.sol";
 import {MockPriceProvider} from "../../mocks/MockPriceProvider.sol";
 import {IKingVault} from "../../../src/interfaces/IKingVault.sol";
@@ -29,8 +29,8 @@ contract ProfitsTest is Test {
     // Contracts
     // ============================================
 
-    BoringVault public boringVault;
-    BoringVault public implementation;
+    KingBoringVault public boringVault;
+    KingBoringVault public implementation;
     MockERC20 public weth;
     MockERC20 public ethfi;
     MockERC20 public usdc;
@@ -97,14 +97,14 @@ contract ProfitsTest is Test {
         accountant.setRate(1.0e18);
 
         // Deploy BoringVault implementation (with immutable addresses)
-        implementation = new BoringVault(
+        implementation = new KingBoringVault(
             address(vaultToken), // vault
             address(teller), // teller
             address(accountant) // accountant
         );
 
         // Deploy and initialize proxy
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
     }
 
     // ============================================
@@ -114,25 +114,25 @@ contract ProfitsTest is Test {
     /**
      * @notice Deploy and initialize a BoringVault proxy with given parameters
      */
-    function _deployBoringVault(
+    function _deployKingBoringVault(
         address _owner,
         address _kingVault,
         address _priceProvider,
         address _atomicQueue,
         address[] memory _tokens,
         bool[] memory _accepted
-    ) internal returns (BoringVault) {
+    ) internal returns (KingBoringVault) {
         bytes memory initData = abi.encodeWithSelector(
-            BoringVault.initialize.selector, _owner, _kingVault, _priceProvider, _atomicQueue, _tokens, _accepted
+            KingBoringVault.initialize.selector, _owner, _kingVault, _priceProvider, _atomicQueue, _tokens, _accepted
         );
         ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initData);
-        return BoringVault(address(proxy));
+        return KingBoringVault(address(proxy));
     }
 
     /**
      * @notice Deploy a properly initialized BoringVault for standard tests
      */
-    function _deployStandardBoringVault() internal returns (BoringVault) {
+    function _deployStandardKingBoringVault() internal returns (KingBoringVault) {
         address[] memory tokens = new address[](3);
         tokens[0] = address(weth);
         tokens[1] = address(ethfi);
@@ -142,7 +142,7 @@ contract ProfitsTest is Test {
         accepted[1] = true;
         accepted[2] = true;
 
-        return _deployBoringVault(owner, kingVault, address(priceProvider), address(atomicQueue), tokens, accepted);
+        return _deployKingBoringVault(owner, kingVault, address(priceProvider), address(atomicQueue), tokens, accepted);
     }
 
     /**
@@ -339,7 +339,7 @@ contract ProfitsTest is Test {
         boringVault.harvestProfits();
 
         // Verify withdrawal was queued in AtomicQueue
-        BoringVault.WithdrawalRequest memory request = boringVault.getWithdrawalRequest(address(weth));
+        KingBoringVault.WithdrawalRequest memory request = boringVault.getWithdrawalRequest(address(weth));
         assertGt(request.want, 0, "Withdrawal should be queued");
         assertEq(request.asset, address(weth), "Should request WETH");
     }

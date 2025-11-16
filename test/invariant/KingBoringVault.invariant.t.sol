@@ -4,14 +4,14 @@ pragma solidity ^0.8.25;
 import {Test} from "forge-std/Test.sol";
 import {console2} from "forge-std/console2.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import {BoringVault} from "../../src/vaults/BoringVault.sol";
+import {KingBoringVault} from "../../src/vaults/KingBoringVault.sol";
 import {MockERC20} from "../mocks/MockERC20.sol";
 import {MockPriceProvider} from "../mocks/MockPriceProvider.sol";
 import {IKingVault} from "../../src/interfaces/IKingVault.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /**
- * @title BoringVaultInvariantTest
+ * @title KingBoringVaultInvariantTest
  * @notice Comprehensive invariant tests for BoringVault state invariants
  * @dev Tests Task 7.8 acceptance criteria:
  *      - Invariant: _deposits[asset] = idle + deployed (as principal)
@@ -30,13 +30,13 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
  * - Tests with multiple assets (WETH, ETHFI, USDC)
  * - Simulates rate changes in Accountant for profit scenarios
  */
-contract BoringVaultInvariantTest is Test {
+contract KingBoringVaultInvariantTest is Test {
     // ============================================
     // Contracts
     // ============================================
 
-    BoringVault public boringVault;
-    BoringVault public implementation;
+    KingBoringVault public boringVault;
+    KingBoringVault public implementation;
     MockERC20 public weth;
     MockERC20 public ethfi;
     MockERC20 public usdc;
@@ -45,7 +45,7 @@ contract BoringVaultInvariantTest is Test {
     MockTeller public teller;
     MockAccountant public accountant;
     MockAtomicQueue public atomicQueue;
-    BoringVaultHandler public handler;
+    KingBoringVaultHandler public handler;
 
     // ============================================
     // Test Addresses
@@ -85,7 +85,7 @@ contract BoringVaultInvariantTest is Test {
         accountant.setRate(1.0e18);
 
         // Deploy BoringVault implementation
-        implementation = new BoringVault(address(vaultToken), address(teller), address(accountant));
+        implementation = new KingBoringVault(address(vaultToken), address(teller), address(accountant));
 
         // Deploy and initialize proxy
         address[] memory tokens = new address[](3);
@@ -98,7 +98,7 @@ contract BoringVaultInvariantTest is Test {
         accepted[2] = true;
 
         bytes memory initData = abi.encodeWithSelector(
-            BoringVault.initialize.selector,
+            KingBoringVault.initialize.selector,
             owner,
             kingVault,
             address(priceProvider),
@@ -107,7 +107,7 @@ contract BoringVaultInvariantTest is Test {
             accepted
         );
         ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initData);
-        boringVault = BoringVault(address(proxy));
+        boringVault = KingBoringVault(address(proxy));
 
         // Setup profit distribution (60% DAO, 40% Treasury)
         address[] memory recipients = new address[](2);
@@ -121,7 +121,7 @@ contract BoringVaultInvariantTest is Test {
         boringVault.setProfitsDistribution(recipients, percentsBPS);
 
         // Deploy handler
-        handler = new BoringVaultHandler(boringVault, weth, ethfi, usdc, vaultToken, accountant, owner, kingVault);
+        handler = new KingBoringVaultHandler(boringVault, weth, ethfi, usdc, vaultToken, accountant, owner, kingVault);
 
         // Target handler for invariant testing
         targetContract(address(handler));
@@ -271,7 +271,7 @@ contract BoringVaultInvariantTest is Test {
         uint256 activeRequestCount = 0;
 
         for (uint256 i = 0; i < assets.length; i++) {
-            BoringVault.WithdrawalRequest memory request = boringVault.getWithdrawalRequest(assets[i]);
+            KingBoringVault.WithdrawalRequest memory request = boringVault.getWithdrawalRequest(assets[i]);
             if (request.deadline > 0) {
                 activeRequestShares = request.want;
                 activeRequestCount++;
@@ -431,7 +431,7 @@ contract BoringVaultInvariantTest is Test {
         address[] memory assets = boringVault.assets();
 
         for (uint256 i = 0; i < assets.length; i++) {
-            BoringVault.WithdrawalRequest memory request = boringVault.getWithdrawalRequest(assets[i]);
+            KingBoringVault.WithdrawalRequest memory request = boringVault.getWithdrawalRequest(assets[i]);
 
             if (request.deadline > 0) {
                 // Active withdrawal request exists
@@ -525,14 +525,14 @@ contract BoringVaultInvariantTest is Test {
 // ============================================
 
 /**
- * @title BoringVaultHandler
+ * @title KingBoringVaultHandler
  * @notice Handler contract for invariant testing
  * @dev Performs randomized operations on BoringVault to test invariants
  * @dev Operations: deposit, depositToVault, withdraw, withdrawFromVault,
  *      completePrincipalWithdraw, harvestProfits, distributeProfits
  */
-contract BoringVaultHandler is Test {
-    BoringVault public boringVault;
+contract KingBoringVaultHandler is Test {
+    KingBoringVault public boringVault;
     MockERC20 public weth;
     MockERC20 public ethfi;
     MockERC20 public usdc;
@@ -549,7 +549,7 @@ contract BoringVaultHandler is Test {
     uint256 public ghost_failedOperations;
 
     constructor(
-        BoringVault _boringVault,
+        KingBoringVault _boringVault,
         MockERC20 _weth,
         MockERC20 _ethfi,
         MockERC20 _usdc,
@@ -673,7 +673,7 @@ contract BoringVaultHandler is Test {
         if (boringVault.getPendingShares() > 0) return;
 
         // Check if there's already a withdrawal request for this asset
-        BoringVault.WithdrawalRequest memory existingRequest = boringVault.getWithdrawalRequest(asset);
+        KingBoringVault.WithdrawalRequest memory existingRequest = boringVault.getWithdrawalRequest(asset);
         if (existingRequest.deadline > 0) return;
 
         // Get available shares
@@ -703,7 +703,7 @@ contract BoringVaultHandler is Test {
         address asset = _selectAsset(assetSeed);
 
         // Check if there's a pending request for this asset
-        BoringVault.WithdrawalRequest memory request = boringVault.getWithdrawalRequest(asset);
+        KingBoringVault.WithdrawalRequest memory request = boringVault.getWithdrawalRequest(asset);
         if (request.deadline == 0) return;
 
         uint256 pendingShares = boringVault.getPendingShares();
@@ -745,7 +745,7 @@ contract BoringVaultHandler is Test {
         address asset = _selectAsset(assetSeed);
 
         // Check if there's a pending request
-        BoringVault.WithdrawalRequest memory request = boringVault.getWithdrawalRequest(asset);
+        KingBoringVault.WithdrawalRequest memory request = boringVault.getWithdrawalRequest(asset);
         if (request.deadline == 0) return;
 
         vm.prank(owner);
@@ -767,8 +767,15 @@ contract BoringVaultHandler is Test {
         // Current rate
         uint256 currentRate = accountant.getRate();
 
+        // Prevent overflow: cap currentRate to avoid overflow in multiplication
+        if (currentRate > type(uint256).max / 150) {
+            // Rate is too high, skip appreciation
+            return;
+        }
+
         // Bound new rate (100% to 150% of current)
-        uint256 newRate = bound(rateSeed, currentRate, currentRate * 150 / 100);
+        uint256 maxRate = (currentRate * 150) / 100;
+        uint256 newRate = bound(rateSeed, currentRate, maxRate);
 
         accountant.setRate(newRate);
     }
@@ -799,7 +806,7 @@ contract BoringVaultHandler is Test {
         address baseAsset = accountant.base();
 
         // Check if there's a pending profit harvest
-        BoringVault.WithdrawalRequest memory request = boringVault.getWithdrawalRequest(baseAsset);
+        KingBoringVault.WithdrawalRequest memory request = boringVault.getWithdrawalRequest(baseAsset);
         if (request.deadline == 0) return;
 
         uint256 pendingShares = boringVault.getPendingShares();

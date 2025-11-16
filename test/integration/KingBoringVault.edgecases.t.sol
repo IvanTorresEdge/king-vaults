@@ -4,14 +4,14 @@ pragma solidity ^0.8.25;
 import {Test} from "forge-std/Test.sol";
 import {console2} from "forge-std/console2.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import {BoringVault} from "../../src/vaults/BoringVault.sol";
+import {KingBoringVault} from "../../src/vaults/KingBoringVault.sol";
 import {MockERC20} from "../mocks/MockERC20.sol";
 import {MockPriceProvider} from "../mocks/MockPriceProvider.sol";
 import {IKingVault} from "../../src/interfaces/IKingVault.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /**
- * @title BoringVaultEdgeCasesTest
+ * @title KingBoringVaultEdgeCasesTest
  * @notice Comprehensive edge case integration tests for BoringVault - Task 7.6
  * @dev Tests boundary conditions and error scenarios:
  *      - Test operations with maximum allowed values (uint256 max, large amounts)
@@ -31,13 +31,13 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
  * - State consistency after transaction failures
  * - Multiple pending withdrawals across assets
  */
-contract BoringVaultEdgeCasesTest is Test {
+contract KingBoringVaultEdgeCasesTest is Test {
     // ============================================
     // Contracts
     // ============================================
 
-    BoringVault public boringVault;
-    BoringVault public implementation;
+    KingBoringVault public boringVault;
+    KingBoringVault public implementation;
     MockERC20 public weth;
     MockERC20 public ethfi;
     MockERC20 public usdc; // 6 decimals
@@ -103,7 +103,7 @@ contract BoringVaultEdgeCasesTest is Test {
         accountant.setRate(1.0e18);
 
         // Deploy BoringVault implementation
-        implementation = new BoringVault(address(vaultToken), address(teller), address(accountant));
+        implementation = new KingBoringVault(address(vaultToken), address(teller), address(accountant));
 
         // Deploy and initialize proxy with all tokens
         address[] memory tokens = new address[](4);
@@ -118,7 +118,7 @@ contract BoringVaultEdgeCasesTest is Test {
         accepted[3] = true;
 
         bytes memory initData = abi.encodeWithSelector(
-            BoringVault.initialize.selector,
+            KingBoringVault.initialize.selector,
             owner,
             kingVault,
             address(priceProvider),
@@ -127,7 +127,7 @@ contract BoringVaultEdgeCasesTest is Test {
             accepted
         );
         ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initData);
-        boringVault = BoringVault(address(proxy));
+        boringVault = KingBoringVault(address(proxy));
     }
 
     // ============================================
@@ -202,7 +202,7 @@ contract BoringVaultEdgeCasesTest is Test {
         // Verify withdrawal queued
         assertEq(boringVault.getPendingShares(), shares);
 
-        BoringVault.WithdrawalRequest memory request = boringVault.getWithdrawalRequest(address(weth));
+        KingBoringVault.WithdrawalRequest memory request = boringVault.getWithdrawalRequest(address(weth));
         assertEq(request.want, shares);
     }
 
@@ -427,7 +427,7 @@ contract BoringVaultEdgeCasesTest is Test {
     function testEdgeCase_ExtremeSlippage_ExceedsLimit() public {
         // Try to set slippage above 10% (1001 BPS)
         vm.prank(owner);
-        vm.expectRevert(abi.encodeWithSelector(BoringVault.SlippageExceedsLimit.selector, 1001, 1000));
+        vm.expectRevert(abi.encodeWithSelector(KingBoringVault.SlippageExceedsLimit.selector, 1001, 1000));
         boringVault.setMaxSlippage(1001);
     }
 
@@ -465,7 +465,7 @@ contract BoringVaultEdgeCasesTest is Test {
         vm.prank(owner);
         boringVault.withdrawFromVault(address(weth), shares, 0);
 
-        BoringVault.WithdrawalRequest memory request = boringVault.getWithdrawalRequest(address(weth));
+        KingBoringVault.WithdrawalRequest memory request = boringVault.getWithdrawalRequest(address(weth));
         assertTrue(request.deadline > 0);
     }
 
@@ -563,8 +563,8 @@ contract BoringVaultEdgeCasesTest is Test {
         assertEq(boringVault.getPendingShares(), wethShares / 2 + ethfiShares / 2);
 
         // Verify both withdrawal requests exist
-        BoringVault.WithdrawalRequest memory wethRequest = boringVault.getWithdrawalRequest(address(weth));
-        BoringVault.WithdrawalRequest memory ethfiRequest = boringVault.getWithdrawalRequest(address(ethfi));
+        KingBoringVault.WithdrawalRequest memory wethRequest = boringVault.getWithdrawalRequest(address(weth));
+        KingBoringVault.WithdrawalRequest memory ethfiRequest = boringVault.getWithdrawalRequest(address(ethfi));
         assertTrue(wethRequest.deadline > 0);
         assertTrue(ethfiRequest.deadline > 0);
     }
@@ -702,7 +702,7 @@ contract BoringVaultEdgeCasesTest is Test {
         uint256 finalPrincipal = boringVault.getBalance(address(weth));
         assertTrue(finalPrincipal >= depositAmount);
 
-        BoringVault.WithdrawalRequest memory request = boringVault.getWithdrawalRequest(address(weth));
+        KingBoringVault.WithdrawalRequest memory request = boringVault.getWithdrawalRequest(address(weth));
         assertEq(request.deadline, 0); // Request deleted
 
         // After cancel, all shares are available (pending was reset to 0)
@@ -739,7 +739,7 @@ contract BoringVaultEdgeCasesTest is Test {
     function testEdgeCase_FailedOps_CompleteNonExistentWithdrawal() public {
         // Try to complete withdrawal without queuing
         vm.prank(owner);
-        vm.expectRevert(BoringVault.WithdrawalNotQueued.selector);
+        vm.expectRevert(KingBoringVault.WithdrawalNotQueued.selector);
         boringVault.completePrincipalWithdraw(address(weth), 1000e18, kingVault);
     }
 
@@ -850,7 +850,7 @@ contract BoringVaultEdgeCasesTest is Test {
         vm.prank(owner);
         boringVault.withdrawFromVault(address(weth), shares, deadline);
 
-        BoringVault.WithdrawalRequest memory request = boringVault.getWithdrawalRequest(address(weth));
+        KingBoringVault.WithdrawalRequest memory request = boringVault.getWithdrawalRequest(address(weth));
         assertEq(request.deadline, deadline);
 
         // Advance time to exactly deadline
@@ -882,7 +882,7 @@ contract BoringVaultEdgeCasesTest is Test {
         vm.prank(owner);
         boringVault.withdrawFromVault(address(weth), shares, deadline);
 
-        BoringVault.WithdrawalRequest memory request = boringVault.getWithdrawalRequest(address(weth));
+        KingBoringVault.WithdrawalRequest memory request = boringVault.getWithdrawalRequest(address(weth));
         assertEq(request.deadline, deadline);
 
         // Can still complete immediately (deadline is for solver expiry)
@@ -905,7 +905,7 @@ contract BoringVaultEdgeCasesTest is Test {
         vm.prank(owner);
         boringVault.withdrawFromVault(address(weth), shares, 0);
 
-        BoringVault.WithdrawalRequest memory request = boringVault.getWithdrawalRequest(address(weth));
+        KingBoringVault.WithdrawalRequest memory request = boringVault.getWithdrawalRequest(address(weth));
 
         // Deadline should be current time + 7 days
         uint64 expectedDeadline = uint64(block.timestamp + 7 days);
@@ -929,7 +929,7 @@ contract BoringVaultEdgeCasesTest is Test {
         vm.prank(owner);
         boringVault.withdrawFromVault(address(weth), shares, 0);
 
-        BoringVault.WithdrawalRequest memory request = boringVault.getWithdrawalRequest(address(weth));
+        KingBoringVault.WithdrawalRequest memory request = boringVault.getWithdrawalRequest(address(weth));
 
         // Deadline should be current time + 1 day
         uint64 expectedDeadline = uint64(block.timestamp + 1 days);

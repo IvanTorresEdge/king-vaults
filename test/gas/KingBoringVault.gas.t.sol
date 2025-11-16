@@ -4,14 +4,14 @@ pragma solidity ^0.8.25;
 import {Test} from "forge-std/Test.sol";
 import {console2} from "forge-std/console2.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import {BoringVault} from "../../src/vaults/BoringVault.sol";
+import {KingBoringVault} from "../../src/vaults/KingBoringVault.sol";
 import {MockERC20} from "../mocks/MockERC20.sol";
 import {MockPriceProvider} from "../mocks/MockPriceProvider.sol";
 import {IKingVault} from "../../src/interfaces/IKingVault.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /**
- * @title BoringVaultGasTest
+ * @title KingBoringVaultGasTest
  * @notice Gas profiling tests for BoringVault major operations
  * @dev Tests Task 7.9 acceptance criteria:
  *      - Profile depositToVault() < 500k gas
@@ -22,13 +22,13 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
  *      - Document gas costs for all major operations
  *      - Identify optimization opportunities
  */
-contract BoringVaultGasTest is Test {
+contract KingBoringVaultGasTest is Test {
     // ============================================
     // Contracts
     // ============================================
 
-    BoringVault public boringVault;
-    BoringVault public implementation;
+    KingBoringVault public boringVault;
+    KingBoringVault public implementation;
     MockERC20 public weth;
     MockERC20 public ethfi;
     MockERC20 public usdc;
@@ -89,14 +89,14 @@ contract BoringVaultGasTest is Test {
         accountant.setRate(1.0e18);
 
         // Deploy BoringVault implementation (with immutable addresses)
-        implementation = new BoringVault(
+        implementation = new KingBoringVault(
             address(vaultToken), // vault
             address(teller), // teller
             address(accountant) // accountant
         );
 
         // Deploy and initialize proxy
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
 
         // Fund kingVault with tokens
         weth.mint(kingVault, 10000e18);
@@ -108,22 +108,22 @@ contract BoringVaultGasTest is Test {
     // Helper Functions
     // ============================================
 
-    function _deployBoringVault(
+    function _deployKingBoringVault(
         address _owner,
         address _kingVault,
         address _priceProvider,
         address _atomicQueue,
         address[] memory _tokens,
         bool[] memory _accepted
-    ) internal returns (BoringVault) {
+    ) internal returns (KingBoringVault) {
         bytes memory initData = abi.encodeWithSelector(
-            BoringVault.initialize.selector, _owner, _kingVault, _priceProvider, _atomicQueue, _tokens, _accepted
+            KingBoringVault.initialize.selector, _owner, _kingVault, _priceProvider, _atomicQueue, _tokens, _accepted
         );
         ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initData);
-        return BoringVault(address(proxy));
+        return KingBoringVault(address(proxy));
     }
 
-    function _deployStandardBoringVault() internal returns (BoringVault) {
+    function _deployStandardKingBoringVault() internal returns (KingBoringVault) {
         address[] memory tokens = new address[](3);
         tokens[0] = address(weth);
         tokens[1] = address(ethfi);
@@ -133,7 +133,7 @@ contract BoringVaultGasTest is Test {
         accepted[1] = true;
         accepted[2] = true;
 
-        return _deployBoringVault(owner, kingVault, address(priceProvider), address(atomicQueue), tokens, accepted);
+        return _deployKingBoringVault(owner, kingVault, address(priceProvider), address(atomicQueue), tokens, accepted);
     }
 
     function _recordGas(string memory operation, uint256 gasUsed, uint256 gasLimit) internal {
@@ -677,7 +677,7 @@ contract BoringVaultGasTest is Test {
         console2.log("========================================");
         console2.log("");
         console2.log("Note: Run individual gas tests to populate this report");
-        console2.log("      Use: forge test --match-contract BoringVaultGasTest --gas-report");
+        console2.log("      Use: forge test --match-contract KingBoringVaultGasTest --gas-report");
         console2.log("");
         console2.log("Acceptance Criteria:");
         console2.log("  - depositToVault()        < 500,000 gas");
@@ -686,7 +686,7 @@ contract BoringVaultGasTest is Test {
         console2.log("  - calculateProfit()       <  50,000 gas per asset");
         console2.log("  - View functions          <  30,000 gas");
         console2.log("");
-        console2.log("Run: forge test --match-contract BoringVaultGasTest -vv");
+        console2.log("Run: forge test --match-contract KingBoringVaultGasTest -vv");
         console2.log("========================================");
     }
 }

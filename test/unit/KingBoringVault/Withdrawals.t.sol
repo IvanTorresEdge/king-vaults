@@ -4,7 +4,7 @@ pragma solidity ^0.8.25;
 import {Test} from "forge-std/Test.sol";
 import {console2} from "forge-std/console2.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import {BoringVault} from "../../../src/vaults/BoringVault.sol";
+import {KingBoringVault} from "../../../src/vaults/KingBoringVault.sol";
 import {MockERC20} from "../../mocks/MockERC20.sol";
 import {MockPriceProvider} from "../../mocks/MockPriceProvider.sol";
 import {IKingVault} from "../../../src/interfaces/IKingVault.sol";
@@ -37,8 +37,8 @@ contract WithdrawalsTest is Test {
     // Contracts
     // ============================================
 
-    BoringVault public boringVault;
-    BoringVault public implementation;
+    KingBoringVault public boringVault;
+    KingBoringVault public implementation;
     MockERC20 public weth;
     MockERC20 public ethfi;
     MockERC20 public usdc;
@@ -98,14 +98,14 @@ contract WithdrawalsTest is Test {
         accountant.setRate(1.0e18);
 
         // Deploy BoringVault implementation (with immutable addresses)
-        implementation = new BoringVault(
+        implementation = new KingBoringVault(
             address(vaultToken), // vault
             address(teller), // teller
             address(accountant) // accountant
         );
 
         // Deploy and initialize proxy
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
     }
 
     // ============================================
@@ -115,25 +115,25 @@ contract WithdrawalsTest is Test {
     /**
      * @notice Deploy and initialize a BoringVault proxy with given parameters
      */
-    function _deployBoringVault(
+    function _deployKingBoringVault(
         address _owner,
         address _kingVault,
         address _priceProvider,
         address _atomicQueue,
         address[] memory _tokens,
         bool[] memory _accepted
-    ) internal returns (BoringVault) {
+    ) internal returns (KingBoringVault) {
         bytes memory initData = abi.encodeWithSelector(
-            BoringVault.initialize.selector, _owner, _kingVault, _priceProvider, _atomicQueue, _tokens, _accepted
+            KingBoringVault.initialize.selector, _owner, _kingVault, _priceProvider, _atomicQueue, _tokens, _accepted
         );
         ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initData);
-        return BoringVault(address(proxy));
+        return KingBoringVault(address(proxy));
     }
 
     /**
      * @notice Deploy a properly initialized BoringVault for standard tests
      */
-    function _deployStandardBoringVault() internal returns (BoringVault) {
+    function _deployStandardKingBoringVault() internal returns (KingBoringVault) {
         address[] memory tokens = new address[](3);
         tokens[0] = address(weth);
         tokens[1] = address(ethfi);
@@ -143,7 +143,7 @@ contract WithdrawalsTest is Test {
         accepted[1] = true;
         accepted[2] = true;
 
-        return _deployBoringVault(owner, kingVault, address(priceProvider), address(atomicQueue), tokens, accepted);
+        return _deployKingBoringVault(owner, kingVault, address(priceProvider), address(atomicQueue), tokens, accepted);
     }
 
     /**
@@ -317,7 +317,7 @@ contract WithdrawalsTest is Test {
         boringVault.withdrawFromVault(address(weth), sharesToWithdraw, 0);
 
         // Verify request stored
-        BoringVault.WithdrawalRequest memory request = boringVault.getWithdrawalRequest(address(weth));
+        KingBoringVault.WithdrawalRequest memory request = boringVault.getWithdrawalRequest(address(weth));
         assertEq(request.asset, address(weth), "Asset should be set");
         assertEq(request.want, sharesToWithdraw, "Want should be share amount");
         assertEq(request.offer, expectedAmount, "Offer should be expected asset amount");
@@ -368,7 +368,7 @@ contract WithdrawalsTest is Test {
         boringVault.withdrawFromVault(address(weth), 500e18, customDeadline);
 
         // Verify deadline
-        BoringVault.WithdrawalRequest memory request = boringVault.getWithdrawalRequest(address(weth));
+        KingBoringVault.WithdrawalRequest memory request = boringVault.getWithdrawalRequest(address(weth));
         assertEq(request.deadline, customDeadline, "Should use custom deadline");
     }
 
@@ -478,7 +478,7 @@ contract WithdrawalsTest is Test {
         boringVault.withdrawFromVault(address(weth), sharesToWithdraw, 0);
 
         // Verify request exists
-        BoringVault.WithdrawalRequest memory requestBefore = boringVault.getWithdrawalRequest(address(weth));
+        KingBoringVault.WithdrawalRequest memory requestBefore = boringVault.getWithdrawalRequest(address(weth));
         assertGt(requestBefore.deadline, 0, "Request should exist");
 
         // Complete withdrawal
@@ -487,7 +487,7 @@ contract WithdrawalsTest is Test {
         boringVault.completePrincipalWithdraw(address(weth), expectedAmount, kingVault);
 
         // Verify request cleared
-        BoringVault.WithdrawalRequest memory requestAfter = boringVault.getWithdrawalRequest(address(weth));
+        KingBoringVault.WithdrawalRequest memory requestAfter = boringVault.getWithdrawalRequest(address(weth));
         assertEq(requestAfter.deadline, 0, "Request should be deleted");
         assertEq(requestAfter.asset, address(0), "Request should be deleted");
     }
@@ -735,7 +735,7 @@ contract WithdrawalsTest is Test {
         boringVault.cancelWithdrawFromVault(address(weth));
 
         // Request should be deleted
-        BoringVault.WithdrawalRequest memory request = boringVault.getWithdrawalRequest(address(weth));
+        KingBoringVault.WithdrawalRequest memory request = boringVault.getWithdrawalRequest(address(weth));
         assertEq(request.deadline, 0, "Request should be deleted");
     }
 
@@ -962,7 +962,7 @@ contract WithdrawalsTest is Test {
 
         // AtomicQueue should have slippage protection encoded in atomicPrice
         // This is verified indirectly through the withdrawal request
-        BoringVault.WithdrawalRequest memory request = boringVault.getWithdrawalRequest(address(weth));
+        KingBoringVault.WithdrawalRequest memory request = boringVault.getWithdrawalRequest(address(weth));
         assertGt(request.offer, minAmount, "Offer should reflect slippage protection");
     }
 
@@ -972,7 +972,7 @@ contract WithdrawalsTest is Test {
 
     function test_requestState_CreatedToPendingToCompleted() public {
         // Initial: no request
-        BoringVault.WithdrawalRequest memory initial = boringVault.getWithdrawalRequest(address(weth));
+        KingBoringVault.WithdrawalRequest memory initial = boringVault.getWithdrawalRequest(address(weth));
         assertEq(initial.deadline, 0, "No request initially");
 
         // Setup
@@ -986,7 +986,7 @@ contract WithdrawalsTest is Test {
         vm.prank(owner);
         boringVault.withdrawFromVault(address(weth), sharesToWithdraw, 0);
 
-        BoringVault.WithdrawalRequest memory pending = boringVault.getWithdrawalRequest(address(weth));
+        KingBoringVault.WithdrawalRequest memory pending = boringVault.getWithdrawalRequest(address(weth));
         assertGt(pending.deadline, 0, "Request should exist");
         assertEq(boringVault.getPendingShares(), sharesToWithdraw, "Shares pending");
 
@@ -995,7 +995,7 @@ contract WithdrawalsTest is Test {
         vm.prank(owner);
         boringVault.completePrincipalWithdraw(address(weth), expectedAmount, kingVault);
 
-        BoringVault.WithdrawalRequest memory completed = boringVault.getWithdrawalRequest(address(weth));
+        KingBoringVault.WithdrawalRequest memory completed = boringVault.getWithdrawalRequest(address(weth));
         assertEq(completed.deadline, 0, "Request should be deleted");
         assertEq(boringVault.getPendingShares(), 0, "Shares cleared");
     }
@@ -1009,14 +1009,14 @@ contract WithdrawalsTest is Test {
         vm.prank(owner);
         boringVault.withdrawFromVault(address(weth), 500e18, 0);
 
-        BoringVault.WithdrawalRequest memory pending = boringVault.getWithdrawalRequest(address(weth));
+        KingBoringVault.WithdrawalRequest memory pending = boringVault.getWithdrawalRequest(address(weth));
         assertGt(pending.deadline, 0, "Request should exist");
 
         // State 2: Request cancelled
         vm.prank(owner);
         boringVault.cancelWithdrawFromVault(address(weth));
 
-        BoringVault.WithdrawalRequest memory cancelled = boringVault.getWithdrawalRequest(address(weth));
+        KingBoringVault.WithdrawalRequest memory cancelled = boringVault.getWithdrawalRequest(address(weth));
         assertEq(cancelled.deadline, 0, "Request should be deleted");
         assertEq(boringVault.getPendingShares(), 0, "Shares cleared");
     }

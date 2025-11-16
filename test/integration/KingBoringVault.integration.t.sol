@@ -4,14 +4,14 @@ pragma solidity ^0.8.25;
 import {Test} from "forge-std/Test.sol";
 import {console2} from "forge-std/console2.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import {BoringVault} from "../../src/vaults/BoringVault.sol";
+import {KingBoringVault} from "../../src/vaults/KingBoringVault.sol";
 import {MockERC20} from "../mocks/MockERC20.sol";
 import {MockPriceProvider} from "../mocks/MockPriceProvider.sol";
 import {IKingVault} from "../../src/interfaces/IKingVault.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /**
- * @title BoringVaultIntegrationTest
+ * @title KingBoringVaultIntegrationTest
  * @notice Comprehensive integration tests for BoringVault - Full Cycles
  * @dev Tests Task 7.5 acceptance criteria:
  *      - Complete deposit flow: kingVault deposit → vault deployment
@@ -23,13 +23,13 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
  *      - Interaction between multiple features (deposits while withdrawals pending, etc.)
  *      - State consistency after complex operation sequences
  */
-contract BoringVaultIntegrationTest is Test {
+contract KingBoringVaultIntegrationTest is Test {
     // ============================================
     // Contracts
     // ============================================
 
-    BoringVault public boringVault;
-    BoringVault public implementation;
+    KingBoringVault public boringVault;
+    KingBoringVault public implementation;
     MockERC20 public weth;
     MockERC20 public ethfi;
     MockERC20 public usdc;
@@ -103,10 +103,10 @@ contract BoringVaultIntegrationTest is Test {
         accountant.setRate(1.0e18);
 
         // Deploy BoringVault implementation
-        implementation = new BoringVault(address(vaultToken), address(teller), address(accountant));
+        implementation = new KingBoringVault(address(vaultToken), address(teller), address(accountant));
 
         // Deploy and initialize proxy
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
 
         // Setup profit distribution (60% DAO, 40% Treasury)
         _setupProfitDistribution();
@@ -116,22 +116,22 @@ contract BoringVaultIntegrationTest is Test {
     // Helper Functions
     // ============================================
 
-    function _deployBoringVault(
+    function _deployKingBoringVault(
         address _owner,
         address _kingVault,
         address _priceProvider,
         address _atomicQueue,
         address[] memory _tokens,
         bool[] memory _accepted
-    ) internal returns (BoringVault) {
+    ) internal returns (KingBoringVault) {
         bytes memory initData = abi.encodeWithSelector(
-            BoringVault.initialize.selector, _owner, _kingVault, _priceProvider, _atomicQueue, _tokens, _accepted
+            KingBoringVault.initialize.selector, _owner, _kingVault, _priceProvider, _atomicQueue, _tokens, _accepted
         );
         ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initData);
-        return BoringVault(address(proxy));
+        return KingBoringVault(address(proxy));
     }
 
-    function _deployStandardBoringVault() internal returns (BoringVault) {
+    function _deployStandardKingBoringVault() internal returns (KingBoringVault) {
         address[] memory tokens = new address[](3);
         tokens[0] = address(weth);
         tokens[1] = address(ethfi);
@@ -141,7 +141,7 @@ contract BoringVaultIntegrationTest is Test {
         accepted[1] = true;
         accepted[2] = true;
 
-        return _deployBoringVault(owner, kingVault, address(priceProvider), address(atomicQueue), tokens, accepted);
+        return _deployKingBoringVault(owner, kingVault, address(priceProvider), address(atomicQueue), tokens, accepted);
     }
 
     function _setupProfitDistribution() internal {
@@ -297,7 +297,7 @@ contract BoringVaultIntegrationTest is Test {
         assertEq(boringVault.getPendingShares(), sharesToWithdraw);
 
         // Verify: Withdrawal request stored
-        BoringVault.WithdrawalRequest memory request = boringVault.getWithdrawalRequest(address(weth));
+        KingBoringVault.WithdrawalRequest memory request = boringVault.getWithdrawalRequest(address(weth));
         assertEq(request.asset, address(weth));
         assertEq(request.want, sharesToWithdraw);
         assertTrue(request.deadline > 0);
@@ -1096,8 +1096,8 @@ contract MockAtomicQueue {
 /**
  * @notice Mock BoringVaultV2 for upgrade testing
  */
-contract BoringVaultV2 is BoringVault {
-    constructor(address _vault, address _teller, address _accountant) BoringVault(_vault, _teller, _accountant) {}
+contract BoringVaultV2 is KingBoringVault {
+    constructor(address _vault, address _teller, address _accountant) KingBoringVault(_vault, _teller, _accountant) {}
 
     function version() external pure returns (uint256) {
         return 2;

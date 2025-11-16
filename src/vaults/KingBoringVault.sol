@@ -14,7 +14,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IPriceProvider} from "../interfaces/IPriceProvider.sol";
 
 /**
- * @title BoringVault
+ * @title KingBoringVault
  * @author King Protocol (https://www.kingprotocol.org)
  * @custom:security-contact security@kingprotocol.com
  * @notice King Vault implementation for Veda Finance BoringVault integration
@@ -39,7 +39,7 @@ import {IPriceProvider} from "../interfaces/IPriceProvider.sol";
  * 2. withdraw(): Queue request via AtomicQueue → solver fulfills → transfer asset back
  * 3. harvestProfits(): Calculate share appreciation → distribute to recipients
  */
-contract BoringVault is KingVault {
+contract KingBoringVault is KingVault {
     // ============================================
     // Immutable State
     // ============================================

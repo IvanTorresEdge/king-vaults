@@ -3,7 +3,7 @@ pragma solidity ^0.8.25;
 
 import {Test} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import {BoringVault} from "../../../src/vaults/BoringVault.sol";
+import {KingBoringVault} from "../../../src/vaults/KingBoringVault.sol";
 import {MockERC20} from "../../mocks/MockERC20.sol";
 import {MockPriceProvider} from "../../mocks/MockPriceProvider.sol";
 import {IKingVault} from "../../../src/interfaces/IKingVault.sol";
@@ -26,8 +26,8 @@ contract CoreInfrastructureTest is Test {
     // Contracts
     // ============================================
 
-    BoringVault public boringVault;
-    BoringVault public implementation;
+    KingBoringVault public boringVault;
+    KingBoringVault public implementation;
     MockERC20 public weth;
     MockERC20 public ethfi;
     MockPriceProvider public priceProvider;
@@ -78,7 +78,7 @@ contract CoreInfrastructureTest is Test {
         accountant.setRate(1.2e18);
 
         // Deploy BoringVault implementation (with immutable addresses)
-        implementation = new BoringVault(
+        implementation = new KingBoringVault(
             address(vaultToken), // vault
             address(teller), // teller
             address(accountant) // accountant
@@ -92,25 +92,25 @@ contract CoreInfrastructureTest is Test {
     /**
      * @notice Deploy and initialize a BoringVault proxy with given parameters
      */
-    function _deployBoringVault(
+    function _deployKingBoringVault(
         address _owner,
         address _kingVault,
         address _priceProvider,
         address _atomicQueue,
         address[] memory _tokens,
         bool[] memory _accepted
-    ) internal returns (BoringVault) {
+    ) internal returns (KingBoringVault) {
         bytes memory initData = abi.encodeWithSelector(
-            BoringVault.initialize.selector, _owner, _kingVault, _priceProvider, _atomicQueue, _tokens, _accepted
+            KingBoringVault.initialize.selector, _owner, _kingVault, _priceProvider, _atomicQueue, _tokens, _accepted
         );
         ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initData);
-        return BoringVault(address(proxy));
+        return KingBoringVault(address(proxy));
     }
 
     /**
      * @notice Deploy a properly initialized BoringVault for standard tests
      */
-    function _deployStandardBoringVault() internal returns (BoringVault) {
+    function _deployStandardKingBoringVault() internal returns (KingBoringVault) {
         address[] memory tokens = new address[](2);
         tokens[0] = address(weth);
         tokens[1] = address(ethfi);
@@ -118,7 +118,7 @@ contract CoreInfrastructureTest is Test {
         accepted[0] = true;
         accepted[1] = true;
 
-        return _deployBoringVault(owner, kingVault, address(priceProvider), address(atomicQueue), tokens, accepted);
+        return _deployKingBoringVault(owner, kingVault, address(priceProvider), address(atomicQueue), tokens, accepted);
     }
 
     // ============================================
@@ -132,7 +132,7 @@ contract CoreInfrastructureTest is Test {
         accepted[0] = true;
 
         boringVault =
-            _deployBoringVault(owner, kingVault, address(priceProvider), address(atomicQueue), tokens, accepted);
+            _deployKingBoringVault(owner, kingVault, address(priceProvider), address(atomicQueue), tokens, accepted);
 
         // Verify owner set correctly
         assertEq(boringVault.owner(), owner);
@@ -165,7 +165,7 @@ contract CoreInfrastructureTest is Test {
         address[] memory emptyTokens = new address[](0);
         bool[] memory emptyAccepted = new bool[](0);
 
-        boringVault = _deployBoringVault(
+        boringVault = _deployKingBoringVault(
             owner, kingVault, address(priceProvider), address(atomicQueue), emptyTokens, emptyAccepted
         );
 
@@ -182,7 +182,7 @@ contract CoreInfrastructureTest is Test {
         accepted[1] = true;
 
         boringVault =
-            _deployBoringVault(owner, kingVault, address(priceProvider), address(atomicQueue), tokens, accepted);
+            _deployKingBoringVault(owner, kingVault, address(priceProvider), address(atomicQueue), tokens, accepted);
 
         // Verify both tokens registered
         address[] memory registeredAssets = boringVault.assets();
@@ -198,7 +198,7 @@ contract CoreInfrastructureTest is Test {
         bool[] memory accepted = new bool[](0);
 
         vm.expectRevert(IKingVault.ZeroAddress.selector);
-        _deployBoringVault(address(0), kingVault, address(priceProvider), address(atomicQueue), tokens, accepted);
+        _deployKingBoringVault(address(0), kingVault, address(priceProvider), address(atomicQueue), tokens, accepted);
     }
 
     function test_Initialize_RevertsWithZeroKingVault() public {
@@ -206,7 +206,7 @@ contract CoreInfrastructureTest is Test {
         bool[] memory accepted = new bool[](0);
 
         vm.expectRevert(IKingVault.ZeroAddress.selector);
-        _deployBoringVault(owner, address(0), address(priceProvider), address(atomicQueue), tokens, accepted);
+        _deployKingBoringVault(owner, address(0), address(priceProvider), address(atomicQueue), tokens, accepted);
     }
 
     function test_Initialize_RevertsWithZeroPriceProvider() public {
@@ -214,7 +214,7 @@ contract CoreInfrastructureTest is Test {
         bool[] memory accepted = new bool[](0);
 
         vm.expectRevert(IKingVault.ZeroAddress.selector);
-        _deployBoringVault(owner, kingVault, address(0), address(atomicQueue), tokens, accepted);
+        _deployKingBoringVault(owner, kingVault, address(0), address(atomicQueue), tokens, accepted);
     }
 
     function test_Initialize_RevertsWithZeroAtomicQueue() public {
@@ -222,7 +222,7 @@ contract CoreInfrastructureTest is Test {
         bool[] memory accepted = new bool[](0);
 
         vm.expectRevert(IKingVault.ZeroAddress.selector);
-        _deployBoringVault(owner, kingVault, address(priceProvider), address(0), tokens, accepted);
+        _deployKingBoringVault(owner, kingVault, address(priceProvider), address(0), tokens, accepted);
     }
 
     // ============================================
@@ -230,7 +230,7 @@ contract CoreInfrastructureTest is Test {
     // ============================================
 
     function test_Initialize_CannotBeCalledTwice() public {
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
 
         address[] memory tokens = new address[](0);
         bool[] memory accepted = new bool[](0);
@@ -255,7 +255,7 @@ contract CoreInfrastructureTest is Test {
 
     function test_Constructor_RevertsWithZeroVault() public {
         vm.expectRevert(IKingVault.ZeroAddress.selector);
-        new BoringVault(
+        new KingBoringVault(
             address(0), // zero vault
             address(teller),
             address(accountant)
@@ -264,7 +264,7 @@ contract CoreInfrastructureTest is Test {
 
     function test_Constructor_RevertsWithZeroTeller() public {
         vm.expectRevert(IKingVault.ZeroAddress.selector);
-        new BoringVault(
+        new KingBoringVault(
             address(vaultToken),
             address(0), // zero teller
             address(accountant)
@@ -273,7 +273,7 @@ contract CoreInfrastructureTest is Test {
 
     function test_Constructor_RevertsWithZeroAccountant() public {
         vm.expectRevert(IKingVault.ZeroAddress.selector);
-        new BoringVault(
+        new KingBoringVault(
             address(vaultToken),
             address(teller),
             address(0) // zero accountant
@@ -281,7 +281,7 @@ contract CoreInfrastructureTest is Test {
     }
 
     function test_Constructor_SetsImmutableAddresses() public {
-        BoringVault vault = new BoringVault(address(vaultToken), address(teller), address(accountant));
+        KingBoringVault vault = new KingBoringVault(address(vaultToken), address(teller), address(accountant));
 
         assertEq(vault.vault(), address(vaultToken));
         assertEq(vault.teller(), address(teller));
@@ -293,7 +293,7 @@ contract CoreInfrastructureTest is Test {
     // ============================================
 
     function test_AccessControl_OnlyOwner_SucceedsForOwner() public {
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
 
         // Owner can call owner-only functions
         vm.prank(owner);
@@ -302,7 +302,7 @@ contract CoreInfrastructureTest is Test {
     }
 
     function test_AccessControl_OnlyOwner_RevertsForUnauthorized() public {
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
 
         // Unauthorized caller cannot call owner-only functions
         vm.prank(unauthorized);
@@ -311,7 +311,7 @@ contract CoreInfrastructureTest is Test {
     }
 
     function test_AccessControl_OnlyOwner_RevertsForKingVault() public {
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
 
         // KingVault cannot call owner-only functions (like setMaxSlippage)
         vm.prank(kingVault);
@@ -324,7 +324,7 @@ contract CoreInfrastructureTest is Test {
     // ============================================
 
     function test_AccessControl_OnlyKingVault_SucceedsForKingVault() public {
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
 
         // Prepare deposit
         address[] memory tokens = new address[](1);
@@ -343,7 +343,7 @@ contract CoreInfrastructureTest is Test {
     }
 
     function test_AccessControl_OnlyKingVault_RevertsForOwner() public {
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
 
         address[] memory tokens = new address[](1);
         tokens[0] = address(weth);
@@ -357,7 +357,7 @@ contract CoreInfrastructureTest is Test {
     }
 
     function test_AccessControl_OnlyKingVault_RevertsForUnauthorized() public {
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
 
         address[] memory tokens = new address[](1);
         tokens[0] = address(weth);
@@ -375,7 +375,7 @@ contract CoreInfrastructureTest is Test {
     // ============================================
 
     function test_AccessControl_OnlyOwnerOrKingVault_SucceedsForOwner() public {
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
 
         // Owner can call owner-or-kingVault functions
         vm.prank(owner);
@@ -384,7 +384,7 @@ contract CoreInfrastructureTest is Test {
     }
 
     function test_AccessControl_OnlyOwnerOrKingVault_SucceedsForKingVault() public {
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
 
         // KingVault can call owner-or-kingVault functions
         vm.prank(kingVault);
@@ -393,7 +393,7 @@ contract CoreInfrastructureTest is Test {
     }
 
     function test_AccessControl_OnlyOwnerOrKingVault_RevertsForUnauthorized() public {
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
 
         // Unauthorized caller cannot call owner-or-kingVault functions
         vm.prank(unauthorized);
@@ -402,7 +402,7 @@ contract CoreInfrastructureTest is Test {
     }
 
     function test_AccessControl_OnlyOwnerOrKingVault_EmergencyWithdrawByOwner() public {
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
 
         // Owner can call emergencyWithdraw
         vm.prank(owner);
@@ -410,7 +410,7 @@ contract CoreInfrastructureTest is Test {
     }
 
     function test_AccessControl_OnlyOwnerOrKingVault_EmergencyWithdrawByKingVault() public {
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
 
         // KingVault can call emergencyWithdraw
         vm.prank(kingVault);
@@ -422,7 +422,7 @@ contract CoreInfrastructureTest is Test {
     // ============================================
 
     function test_Pause_SetsPausedStatus() public {
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
 
         // Initially not paused
         assertFalse(boringVault.paused());
@@ -436,7 +436,7 @@ contract CoreInfrastructureTest is Test {
     }
 
     function test_Pause_EmitsEvent() public {
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
 
         // Expect Paused event with owner as caller
         vm.expectEmit(true, false, false, true);
@@ -447,7 +447,7 @@ contract CoreInfrastructureTest is Test {
     }
 
     function test_Pause_CallableByOwner() public {
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
 
         vm.prank(owner);
         boringVault.pause();
@@ -455,7 +455,7 @@ contract CoreInfrastructureTest is Test {
     }
 
     function test_Pause_CallableByKingVault() public {
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
 
         vm.prank(kingVault);
         boringVault.pause();
@@ -463,7 +463,7 @@ contract CoreInfrastructureTest is Test {
     }
 
     function test_Pause_RevertsForUnauthorizedCaller() public {
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
 
         vm.prank(unauthorized);
         vm.expectRevert(IKingVault.OnlyOwnerOrKingVault.selector);
@@ -471,7 +471,7 @@ contract CoreInfrastructureTest is Test {
     }
 
     function test_Pause_RevertsWhenAlreadyPaused() public {
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
 
         vm.prank(owner);
         boringVault.pause();
@@ -487,7 +487,7 @@ contract CoreInfrastructureTest is Test {
     // ============================================
 
     function test_Unpause_ResetsPausedStatus() public {
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
 
         // Pause first
         vm.prank(owner);
@@ -501,7 +501,7 @@ contract CoreInfrastructureTest is Test {
     }
 
     function test_Unpause_EmitsEvent() public {
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
 
         // Pause first
         vm.prank(owner);
@@ -516,7 +516,7 @@ contract CoreInfrastructureTest is Test {
     }
 
     function test_Unpause_CallableByOwner() public {
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
 
         vm.prank(owner);
         boringVault.pause();
@@ -527,7 +527,7 @@ contract CoreInfrastructureTest is Test {
     }
 
     function test_Unpause_CallableByKingVault() public {
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
 
         vm.prank(owner);
         boringVault.pause();
@@ -538,7 +538,7 @@ contract CoreInfrastructureTest is Test {
     }
 
     function test_Unpause_RevertsForUnauthorizedCaller() public {
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
 
         vm.prank(owner);
         boringVault.pause();
@@ -549,7 +549,7 @@ contract CoreInfrastructureTest is Test {
     }
 
     function test_Unpause_RevertsWhenNotPaused() public {
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
 
         // Cannot unpause when not paused
         vm.prank(owner);
@@ -558,7 +558,7 @@ contract CoreInfrastructureTest is Test {
     }
 
     function test_PauseUnpause_Cycle() public {
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
 
         // Start unpaused
         assertFalse(boringVault.paused());
@@ -584,7 +584,7 @@ contract CoreInfrastructureTest is Test {
     // ============================================
 
     function test_Paused_DepositRevertsWhenPaused() public {
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
 
         // Prepare deposit
         address[] memory tokens = new address[](1);
@@ -608,7 +608,7 @@ contract CoreInfrastructureTest is Test {
     }
 
     function test_Paused_DepositWorksWhenNotPaused() public {
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
 
         // Prepare deposit
         address[] memory tokens = new address[](1);
@@ -633,7 +633,7 @@ contract CoreInfrastructureTest is Test {
     // ============================================
 
     function test_Paused_WithdrawRevertsWhenPaused() public {
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
 
         // First deposit some tokens
         address[] memory tokens = new address[](1);
@@ -659,7 +659,7 @@ contract CoreInfrastructureTest is Test {
     }
 
     function test_Paused_WithdrawWorksWhenNotPaused() public {
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
 
         // Deposit tokens
         address[] memory tokens = new address[](1);
@@ -686,7 +686,7 @@ contract CoreInfrastructureTest is Test {
     // ============================================
 
     function test_Paused_EmergencyWithdrawWorksWhenPaused() public {
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
 
         // Deposit tokens
         address[] memory tokens = new address[](1);
@@ -714,7 +714,7 @@ contract CoreInfrastructureTest is Test {
     }
 
     function test_Paused_EmergencyWithdrawWorksWhenNotPaused() public {
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
 
         // Deposit tokens
         address[] memory tokens = new address[](1);
@@ -736,7 +736,7 @@ contract CoreInfrastructureTest is Test {
     }
 
     function test_Paused_EmergencyWithdrawEmitsEvent() public {
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
 
         // Deposit tokens
         address[] memory tokens = new address[](1);
@@ -767,7 +767,7 @@ contract CoreInfrastructureTest is Test {
     // ============================================
 
     function test_Paused_OwnerFunctionsRevertWhenPaused() public {
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
 
         vm.prank(owner);
         boringVault.pause();
@@ -779,7 +779,7 @@ contract CoreInfrastructureTest is Test {
     }
 
     function test_Paused_DepositToVaultRevertsWhenPaused() public {
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
 
         // Deposit some funds first
         address[] memory tokens = new address[](1);
@@ -804,7 +804,7 @@ contract CoreInfrastructureTest is Test {
     }
 
     function test_Paused_WithdrawFromVaultRevertsWhenPaused() public {
-        boringVault = _deployStandardBoringVault();
+        boringVault = _deployStandardKingBoringVault();
 
         // Pause
         vm.prank(owner);
