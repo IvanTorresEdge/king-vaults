@@ -4,6 +4,7 @@ pragma solidity ^0.8.25;
 import {KingVault} from "../base/KingVault.sol";
 import {KingTokenizedVaultStorage} from "./KingTokenizedVaultStorage.sol";
 import {IKingVault} from "../interfaces/IKingVault.sol";
+import {IPriceProvider} from "../interfaces/IPriceProvider.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
@@ -39,6 +40,8 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
  * 5. harvestProfits(): Calculate and withdraw profit shares
  */
 contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
+    using SafeERC20 for IERC20;
+
     // ============================================
     // Constants
     // ============================================
@@ -153,6 +156,26 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
      */
     error InvalidProfitCalculation();
 
+    /**
+     * @notice Thrown when distributeProfits called but no profits are queued
+     * @dev Prevents unnecessary gas consumption on empty distribution
+     */
+    error NoProfitsToDistribute();
+
+    /**
+     * @notice Thrown when slippage parameter exceeds maximum allowed (10%)
+     * @dev Maximum slippage is 1000 basis points (10%)
+     * @param slippage Requested slippage that was rejected
+     */
+    error InvalidSlippage(uint16 slippage);
+
+    /**
+     * @notice Thrown when withdrawal duration is invalid (0 or > 30 days)
+     * @dev Duration must be between 1 second and 30 days
+     * @param duration Invalid duration value
+     */
+    error InvalidDuration(uint64 duration);
+
     // ============================================
     // Events
     // ============================================
@@ -216,6 +239,21 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
      * @param newDuration New duration in seconds
      */
     event WithdrawalDurationUpdated(uint64 oldDuration, uint64 newDuration);
+
+    /**
+     * @notice Emitted when slippage is updated via setMaxSlippage
+     * @dev Simplified version without old value tracking
+     * @param newSlippage New slippage in basis points
+     */
+    event SlippageUpdated(uint16 newSlippage);
+
+    /**
+     * @notice Emitted when profits are distributed to main vault (Type B)
+     * @dev Tracks completion of profit distribution cycle
+     * @param asset ERC-20 token address distributed
+     * @param amount Token amount distributed
+     */
+    event ProfitsDistributed(address indexed asset, uint256 amount);
 
     /**
      * @notice Emitted when proxy is initialized
@@ -399,12 +437,13 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
             // Preview expected assets for request record
             uint256 expectedAssets = IERC4626(vault).convertToAssets(shareAmount);
 
-            // Create withdrawal request
+            // Create withdrawal request (Type A - principal withdrawal)
             _withdrawalRequests[asset] = WithdrawalRequest({
                 asset: asset,
-                offer: expectedAssets,
-                want: shareAmount,
-                deadline: uint64(block.timestamp + withdrawalDuration)
+                shares: shareAmount,
+                expected: expectedAssets,
+                deadline: uint64(block.timestamp + withdrawalDuration),
+                isProfitWithdrawal: false
             });
 
             // Lock shares
@@ -421,11 +460,11 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
      * @notice Complete pending async withdrawal request
      * @dev Only callable in async mode
      * @dev Validates deadline, redeems shares, routes to appropriate queue
+     * @dev Routes assets based on WithdrawalRequest.isProfitWithdrawal flag
      * @param asset Asset address of pending request
-     * @param isProfitWithdrawal True for Type B (profit), false for Type A (principal)
      * @return assetsReceived Amount of assets received
      */
-    function completeWithdrawal(address asset, bool isProfitWithdrawal)
+    function completeWithdrawal(address asset)
         external
         onlyOwner
         whenNotPaused
@@ -446,23 +485,25 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
         }
 
         // Calculate minimum acceptable assets with slippage
-        uint256 minAssets = Math.mulDiv(request.offer, 10_000 - maxSlippageBPS, 10_000);
+        uint256 minAssets = Math.mulDiv(request.expected, 10_000 - maxSlippageBPS, 10_000);
 
         // Redeem shares for assets
-        assetsReceived = IERC4626(vault).redeem(request.want, address(this), address(this));
+        assetsReceived = IERC4626(vault).redeem(request.shares, address(this), address(this));
 
         // Validate slippage protection
         if (assetsReceived < minAssets) {
-            revert SlippageExceeded(request.offer, assetsReceived);
+            revert SlippageExceeded(request.expected, assetsReceived);
         }
 
         // Release locked shares
-        _pendingShares -= request.want;
+        _pendingShares -= request.shares;
 
-        // Track in appropriate queue based on type
-        if (isProfitWithdrawal) {
+        // Track in appropriate queue based on withdrawal type (Type A vs Type B)
+        if (request.isProfitWithdrawal) {
+            // Type B: Profit withdrawal - queue for distribution
             _queuedProfits[asset] += assetsReceived;
         } else {
+            // Type A: Principal withdrawal - queue for return to main vault
             _queuedWithdraw[asset] += assetsReceived;
         }
 
@@ -490,13 +531,13 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
         if (request.asset == address(0)) revert NoWithdrawalRequest(asset);
 
         // Release locked shares
-        _pendingShares -= request.want;
+        _pendingShares -= request.shares;
 
         // Clear withdrawal request
         delete _withdrawalRequests[asset];
 
         // Emit cancellation event
-        emit WithdrawalCancelled(asset, request.want);
+        emit WithdrawalCancelled(asset, request.shares);
     }
 
     /**
@@ -599,6 +640,236 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
      */
     function getVaultShares() external view returns (uint256 shares) {
         return IERC20(vault).balanceOf(address(this));
+    }
+
+    // ============================================
+    // Flow B: Profit Management
+    // ============================================
+
+    /**
+     * @notice Calculate current profit from share appreciation
+     * @dev Profit = (current share value in ETH) - (principal deposits in ETH)
+     * @dev Uses price provider for asset-to-ETH conversions
+     * @dev Handles multi-asset principal tracking via _deposits mapping
+     * @return profitInEth Total profit across all assets in ETH (18 decimals)
+     */
+    function calculateProfit() public view returns (uint256 profitInEth) {
+        // Get price provider
+        IPriceProvider provider = IPriceProvider(priceProvider);
+
+        // Calculate total principal value in ETH
+        uint256 totalPrincipalEth = 0;
+        for (uint256 i = 0; i < _assets.length; i++) {
+            address asset = _assets[i];
+
+            // Skip if not registered
+            if (!_registeredTokens[asset]) continue;
+
+            // Get principal amount
+            uint256 principal = _deposits[asset];
+            if (principal == 0) continue;
+
+            // Get price in ETH
+            uint256 priceInEth = provider.getPriceInEth(asset);
+            if (priceInEth == 0) revert PriceNotAvailable(asset);
+
+            // Get decimals
+            uint8 decimals = IERC20Metadata(asset).decimals();
+
+            // Calculate principal value in ETH
+            uint256 principalEth = Math.mulDiv(principal, priceInEth, 10 ** decimals);
+            totalPrincipalEth += principalEth;
+        }
+
+        // Calculate current share value in ETH
+        uint256 shares = IERC20(vault).balanceOf(address(this));
+
+        if (shares == 0) {
+            return 0; // No shares = no profit
+        }
+
+        // Convert shares to assets using ERC-4626
+        uint256 currentAssets = IERC4626(vault).convertToAssets(shares);
+
+        // Get the underlying asset of the ERC-4626 vault
+        address underlyingAsset = IERC4626(vault).asset();
+
+        // Convert current assets to ETH
+        uint256 assetPriceInEth = provider.getPriceInEth(underlyingAsset);
+        if (assetPriceInEth == 0) revert PriceNotAvailable(underlyingAsset);
+
+        uint8 assetDecimals = IERC20Metadata(underlyingAsset).decimals();
+        uint256 currentValueEth = Math.mulDiv(currentAssets, assetPriceInEth, 10 ** assetDecimals);
+
+        // Calculate profit (current value - principal)
+        if (currentValueEth <= totalPrincipalEth) {
+            return 0; // No profit or loss
+        }
+
+        return currentValueEth - totalPrincipalEth;
+    }
+
+    /**
+     * @notice Override harvestProfits to implement ERC-4626 profit withdrawal
+     * @dev Calculates profit shares and queues Type B withdrawal
+     * @dev Only callable by owner when not paused
+     * @dev Profit = (current share value) - (principal deposits)
+     */
+    function harvestProfits() external override onlyOwner whenNotPaused {
+        // Calculate current profit
+        uint256 profitInEth = calculateProfit();
+
+        // Revert if no profit to harvest
+        if (profitInEth == 0) revert NoProfitToHarvest();
+
+        // Get current shares
+        uint256 totalShares = IERC20(vault).balanceOf(address(this));
+        if (totalShares == 0) revert NoShares();
+
+        // Calculate current share value in ETH
+        uint256 currentAssets = IERC4626(vault).convertToAssets(totalShares);
+        address underlyingAsset = IERC4626(vault).asset();
+
+        IPriceProvider provider = IPriceProvider(priceProvider);
+        uint256 assetPriceInEth = provider.getPriceInEth(underlyingAsset);
+        if (assetPriceInEth == 0) revert PriceNotAvailable(underlyingAsset);
+
+        uint8 assetDecimals = IERC20Metadata(underlyingAsset).decimals();
+        uint256 currentValueEth = Math.mulDiv(currentAssets, assetPriceInEth, 10 ** assetDecimals);
+
+        if (currentValueEth == 0) revert NoShareValue();
+
+        // Calculate profit shares: (profitInEth / currentValueEth) * totalShares
+        uint256 profitShares = Math.mulDiv(profitInEth, totalShares, currentValueEth);
+
+        if (profitShares == 0) revert NoProfitShares();
+        if (profitShares > totalShares) revert InvalidProfitCalculation();
+
+        // Validate sufficient shares available (not already pending)
+        uint256 availableShares = totalShares - _pendingShares;
+        if (availableShares < profitShares) {
+            revert InsufficientBalance(vault, profitShares, availableShares);
+        }
+
+        // Execute withdrawal based on mode
+        if (isAtomic) {
+            // ATOMIC MODE: Immediate redemption
+            uint256 expectedAssets = IERC4626(vault).convertToAssets(profitShares);
+            uint256 minAssets = Math.mulDiv(expectedAssets, 10_000 - maxSlippageBPS, 10_000);
+
+            // Redeem shares for assets
+            uint256 assetsReceived = IERC4626(vault).redeem(profitShares, address(this), address(this));
+
+            // Validate slippage
+            if (assetsReceived < minAssets) {
+                revert SlippageExceeded(expectedAssets, assetsReceived);
+            }
+
+            // Track in profit queue (Type B)
+            _queuedProfits[underlyingAsset] += assetsReceived;
+
+            // Emit events
+            emit ProfitSharesQueued(profitShares, profitInEth);
+            emit WithdrawalConfirmed(underlyingAsset, assetsReceived);
+        } else {
+            // ASYNC MODE: Create withdrawal request
+            if (_withdrawalRequests[underlyingAsset].asset != address(0)) {
+                revert PendingWithdrawalExists(underlyingAsset);
+            }
+
+            uint256 expectedAssets = IERC4626(vault).convertToAssets(profitShares);
+
+            // Create withdrawal request (Type B - profit withdrawal)
+            _withdrawalRequests[underlyingAsset] = WithdrawalRequest({
+                asset: underlyingAsset,
+                shares: profitShares,
+                expected: expectedAssets,
+                deadline: uint64(block.timestamp + withdrawalDuration),
+                isProfitWithdrawal: true
+            });
+
+            // Lock shares
+            _pendingShares += profitShares;
+
+            // Emit events
+            emit ProfitSharesQueued(profitShares, profitInEth);
+            emit WithdrawalQueued(underlyingAsset, profitShares, expectedAssets, _withdrawalRequests[underlyingAsset].deadline);
+        }
+
+        // Emit harvest event
+        emit ProfitsHarvested(block.timestamp);
+    }
+
+    /**
+     * @notice Override distributeProfits to process queued profit withdrawals
+     * @dev Processes _queuedProfits and transfers to recipients
+     * @dev Type B withdrawal completion - distributes harvested profits
+     */
+    function distributeProfits() external override onlyOwner whenNotPaused {
+        // Get all assets with queued profits
+        address[] memory assetsWithProfits = new address[](_assets.length);
+        uint256 count = 0;
+
+        for (uint256 i = 0; i < _assets.length; i++) {
+            address asset = _assets[i];
+            if (_queuedProfits[asset] > 0) {
+                assetsWithProfits[count] = asset;
+                count++;
+            }
+        }
+
+        if (count == 0) revert NoProfitsToDistribute();
+
+        // Process each asset with queued profits
+        for (uint256 i = 0; i < count; i++) {
+            address asset = assetsWithProfits[i];
+            uint256 profitAmount = _queuedProfits[asset];
+
+            // Verify we have the assets
+            uint256 balance = IERC20(asset).balanceOf(address(this));
+            if (balance < profitAmount) {
+                revert InsufficientBalance(asset, profitAmount, balance);
+            }
+
+            // Clear queued profits first (reentrancy protection)
+            _queuedProfits[asset] = 0;
+
+            // Transfer profits to main vault
+            IERC20(asset).safeTransfer(kingVault, profitAmount);
+
+            emit ProfitsDistributed(asset, profitAmount);
+        }
+    }
+
+    // ============================================
+    // Configuration Functions
+    // ============================================
+
+    /**
+     * @notice Set maximum slippage tolerance for deposits
+     * @dev Only owner can update slippage parameters
+     * @param _maxSlippageBPS Maximum slippage in basis points (1 BPS = 0.01%)
+     * @custom:throws InvalidSlippage if slippage exceeds 10% (1000 BPS)
+     */
+    function setMaxSlippage(uint16 _maxSlippageBPS) external onlyOwner {
+        if (_maxSlippageBPS > 1000) revert InvalidSlippage(_maxSlippageBPS);
+        maxSlippageBPS = _maxSlippageBPS;
+        emit SlippageUpdated(_maxSlippageBPS);
+    }
+
+    /**
+     * @notice Set default duration for withdrawal requests
+     * @dev Only owner can update withdrawal duration
+     * @param _withdrawalDuration Duration in seconds for withdrawal deadlines
+     * @custom:throws InvalidDuration if duration is 0 or exceeds 30 days
+     */
+    function setWithdrawalDuration(uint64 _withdrawalDuration) external onlyOwner {
+        if (_withdrawalDuration == 0 || _withdrawalDuration > 30 days) {
+            revert InvalidDuration(_withdrawalDuration);
+        }
+        uint64 oldDuration = withdrawalDuration;
+        withdrawalDuration = _withdrawalDuration;
+        emit WithdrawalDurationUpdated(oldDuration, _withdrawalDuration);
     }
 
     // ============================================
