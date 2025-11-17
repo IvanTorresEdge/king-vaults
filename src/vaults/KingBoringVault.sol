@@ -429,7 +429,7 @@ contract KingBoringVault is KingVault {
      * @param _kingVault King Protocol core vault address (deposit/withdraw authorization)
      * @param _priceProvider Price oracle address (TVL calculations)
      * @param _atomicQueue Veda AtomicQueue address (withdrawal requests)
-     * @param _tokens Initial asset addresses to register
+     * @param _assets Initial asset addresses to register
      * @param _accepted Initial acceptance status for each asset
      */
     function initialize(
@@ -437,7 +437,7 @@ contract KingBoringVault is KingVault {
         address _kingVault,
         address _priceProvider,
         address _atomicQueue,
-        address[] memory _tokens,
+        address[] memory _assets,
         bool[] memory _accepted
     ) external initializer {
         // Validate all address parameters
@@ -447,7 +447,7 @@ contract KingBoringVault is KingVault {
         if (_atomicQueue == address(0)) revert ZeroAddress();
 
         // Initialize parent KingVault
-        __KingVault_init(_owner, _kingVault, _priceProvider, _tokens, _accepted);
+        __KingVault_init(_owner, _kingVault, _priceProvider, _assets, _accepted);
 
         // Initialize BoringVault state
         atomicQueue = _atomicQueue;

@@ -70,10 +70,10 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
      * @notice Deposit assets from King's core vault to this vault
      * @dev Only callable by King's core vault (kingVault address)
      * @dev Validates arrays, asset acceptance, and amounts before transferring
-     * @param _tokens Array of asset addresses to deposit
+     * @param _assets Array of asset addresses to deposit
      * @param _amounts Array of amounts to deposit (must match assets length)
      */
-    function deposit(address[] memory _tokens, uint256[] memory _amounts) external override {
+    function deposit(address[] memory _assets, uint256[] memory _amounts) external override {
         // Access control: only kingVault can call
         _requireKingVault();
 
@@ -81,13 +81,13 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
         _requireNotPaused();
 
         // Validate arrays non-empty and matching length
-        if (_tokens.length == 0 || _tokens.length != _amounts.length) {
+        if (_assets.length == 0 || _assets.length != _amounts.length) {
             revert InvalidAssetArray();
         }
 
         // Process each token deposit
-        for (uint256 i = 0; i < _tokens.length; i++) {
-            address token = _tokens[i];
+        for (uint256 i = 0; i < _assets.length; i++) {
+            address token = _assets[i];
             uint256 amount = _amounts[i];
 
             // Validate amount > 0
@@ -104,7 +104,7 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
         }
 
         // Emit event with all tokens and amounts
-        emit Deposited(_tokens, _amounts, block.timestamp);
+        emit Deposited(_assets, _amounts, block.timestamp);
     }
 
     // ============================================
