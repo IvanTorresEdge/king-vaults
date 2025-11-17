@@ -100,6 +100,30 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
     error SlippageExceedsLimit(uint16 requested, uint16 maximum);
 
     /**
+     * @notice Thrown when attempting withdrawal operation in wrong mode
+     */
+    error InvalidWithdrawalMode();
+
+    /**
+     * @notice Thrown when no withdrawal request exists for the specified asset
+     * @param asset Asset address with no pending request
+     */
+    error NoWithdrawalRequest(address asset);
+
+    /**
+     * @notice Thrown when withdrawal request deadline has expired
+     * @param asset Asset address of expired request
+     * @param deadline Expiration timestamp that was exceeded
+     */
+    error WithdrawalExpired(address asset, uint64 deadline);
+
+    /**
+     * @notice Thrown when attempting to create duplicate withdrawal request
+     * @param asset Asset address with existing pending request
+     */
+    error PendingWithdrawalExists(address asset);
+
+    /**
      * @notice Thrown when attempting to harvest profits with no profit available
      * @dev Indicates share value has not appreciated since last harvest
      */
@@ -309,6 +333,272 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
 
         // Emit deposit event
         emit DepositCompleted(asset, amount, shares);
+    }
+
+    /**
+     * @notice Withdraw assets from ERC-4626 vault (both atomic and async modes)
+     * @dev Only callable by owner when not paused
+     * @dev Atomic mode: Completes immediately via IERC4626.redeem()
+     * @dev Async mode: Creates withdrawal request, locks shares, requires completeWithdrawal()
+     * @param asset ERC-20 token address to receive
+     * @param shareAmount Vault share amount to redeem
+     * @param isProfitWithdrawal True for Type B (profit), false for Type A (principal)
+     * @return assetsReceived Amount of assets received (atomic mode only, 0 for async)
+     */
+    function withdrawFromVault(address asset, uint256 shareAmount, bool isProfitWithdrawal)
+        external
+        onlyOwner
+        whenNotPaused
+        returns (uint256 assetsReceived)
+    {
+        // Validate share amount
+        if (shareAmount == 0) revert ZeroAmount();
+
+        // Validate asset is registered
+        if (!_registeredTokens[asset]) revert AssetNotAccepted(asset);
+
+        // Calculate available shares (total - pending)
+        uint256 totalShares = IERC20(vault).balanceOf(address(this));
+        uint256 availableShares = totalShares - _pendingShares;
+
+        // Check sufficient shares available
+        if (availableShares < shareAmount) {
+            revert InsufficientBalance(vault, shareAmount, availableShares);
+        }
+
+        if (isAtomic) {
+            // ATOMIC MODE: Immediate redemption
+            // Preview expected assets and calculate minimum acceptable
+            uint256 expectedAssets = IERC4626(vault).convertToAssets(shareAmount);
+            uint256 minAssets = Math.mulDiv(expectedAssets, 10_000 - maxSlippageBPS, 10_000);
+
+            // Redeem shares for assets
+            assetsReceived = IERC4626(vault).redeem(shareAmount, address(this), address(this));
+
+            // Validate slippage protection
+            if (assetsReceived < minAssets) {
+                revert SlippageExceeded(expectedAssets, assetsReceived);
+            }
+
+            // Track in appropriate queue based on type
+            if (isProfitWithdrawal) {
+                _queuedProfits[asset] += assetsReceived;
+            } else {
+                _queuedWithdraw[asset] += assetsReceived;
+            }
+
+            // Emit completion event
+            emit WithdrawalConfirmed(asset, assetsReceived);
+        } else {
+            // ASYNC MODE: Create withdrawal request
+            // Prevent duplicate requests for same asset
+            if (_withdrawalRequests[asset].asset != address(0)) {
+                revert PendingWithdrawalExists(asset);
+            }
+
+            // Preview expected assets for request record
+            uint256 expectedAssets = IERC4626(vault).convertToAssets(shareAmount);
+
+            // Create withdrawal request
+            _withdrawalRequests[asset] = WithdrawalRequest({
+                asset: asset,
+                offer: expectedAssets,
+                want: shareAmount,
+                deadline: uint64(block.timestamp + withdrawalDuration)
+            });
+
+            // Lock shares
+            _pendingShares += shareAmount;
+
+            // Emit queue event
+            emit WithdrawalQueued(asset, shareAmount, expectedAssets, _withdrawalRequests[asset].deadline);
+
+            assetsReceived = 0; // Return 0 for async (not yet completed)
+        }
+    }
+
+    /**
+     * @notice Complete pending async withdrawal request
+     * @dev Only callable in async mode
+     * @dev Validates deadline, redeems shares, routes to appropriate queue
+     * @param asset Asset address of pending request
+     * @param isProfitWithdrawal True for Type B (profit), false for Type A (principal)
+     * @return assetsReceived Amount of assets received
+     */
+    function completeWithdrawal(address asset, bool isProfitWithdrawal)
+        external
+        onlyOwner
+        whenNotPaused
+        returns (uint256 assetsReceived)
+    {
+        // Validate async mode
+        if (isAtomic) revert InvalidWithdrawalMode();
+
+        // Get withdrawal request
+        WithdrawalRequest memory request = _withdrawalRequests[asset];
+
+        // Validate request exists
+        if (request.asset == address(0)) revert NoWithdrawalRequest(asset);
+
+        // Validate deadline not expired
+        if (block.timestamp > request.deadline) {
+            revert WithdrawalExpired(asset, request.deadline);
+        }
+
+        // Calculate minimum acceptable assets with slippage
+        uint256 minAssets = Math.mulDiv(request.offer, 10_000 - maxSlippageBPS, 10_000);
+
+        // Redeem shares for assets
+        assetsReceived = IERC4626(vault).redeem(request.want, address(this), address(this));
+
+        // Validate slippage protection
+        if (assetsReceived < minAssets) {
+            revert SlippageExceeded(request.offer, assetsReceived);
+        }
+
+        // Release locked shares
+        _pendingShares -= request.want;
+
+        // Track in appropriate queue based on type
+        if (isProfitWithdrawal) {
+            _queuedProfits[asset] += assetsReceived;
+        } else {
+            _queuedWithdraw[asset] += assetsReceived;
+        }
+
+        // Clear withdrawal request
+        delete _withdrawalRequests[asset];
+
+        // Emit completion event
+        emit WithdrawalConfirmed(asset, assetsReceived);
+    }
+
+    /**
+     * @notice Cancel pending async withdrawal request
+     * @dev Only callable in async mode
+     * @dev Releases locked shares back to available pool
+     * @param asset Asset address of pending request
+     */
+    function cancelWithdrawal(address asset) external onlyOwner {
+        // Validate async mode
+        if (isAtomic) revert InvalidWithdrawalMode();
+
+        // Get withdrawal request
+        WithdrawalRequest memory request = _withdrawalRequests[asset];
+
+        // Validate request exists
+        if (request.asset == address(0)) revert NoWithdrawalRequest(asset);
+
+        // Release locked shares
+        _pendingShares -= request.want;
+
+        // Clear withdrawal request
+        delete _withdrawalRequests[asset];
+
+        // Emit cancellation event
+        emit WithdrawalCancelled(asset, request.want);
+    }
+
+    /**
+     * @notice Calculate available balance for Flow A withdrawal per asset
+     * @dev Available = idle balance - queued principal - queued profits
+     * @dev Protects assets reserved for Type A (principal) and Type B (profit) operations
+     * @param asset Asset address to check
+     * @return Available amount that can be safely withdrawn to main vault
+     */
+    function availableForWithdraw(address asset) public view returns (uint256) {
+        // Get idle balance (not deployed to vault)
+        uint256 idle = IERC20(asset).balanceOf(address(this));
+
+        // Subtract queued principal withdrawals (Type A)
+        uint256 queuedPrincipal = _queuedWithdraw[asset];
+
+        // Subtract queued profit withdrawals (Type B)
+        uint256 queuedProfit = _queuedProfits[asset];
+
+        // Calculate available (return 0 if queued amounts exceed idle)
+        uint256 totalQueued = queuedPrincipal + queuedProfit;
+        if (idle <= totalQueued) {
+            return 0;
+        }
+
+        return idle - totalQueued;
+    }
+
+    /**
+     * @notice Override withdraw to add availability protection
+     * @dev Prevents withdrawal of assets locked in shares or queued operations
+     * @dev Validates ALL amounts before executing ANY transfers (atomic check)
+     * @param _tokens Array of asset addresses to withdraw
+     * @param _amounts Array of amounts to withdraw
+     * @param _receiver Address to receive withdrawn assets
+     */
+    function withdraw(
+        address[] memory _tokens,
+        uint256[] memory _amounts,
+        address _receiver
+    ) public override {
+        // Access control: only kingVault can call
+        _requireKingVault();
+
+        // Pause check
+        _requireNotPaused();
+
+        // Validate receiver
+        if (_receiver == address(0)) revert ZeroAddress();
+
+        // Validate arrays
+        if (_tokens.length == 0 || _tokens.length != _amounts.length) {
+            revert InvalidAssetArray();
+        }
+
+        // CRITICAL: Check availability for ALL assets BEFORE any transfers
+        // This ensures atomic behavior - either all succeed or all fail
+        for (uint256 i = 0; i < _tokens.length; i++) {
+            address token = _tokens[i];
+            uint256 amount = _amounts[i];
+
+            if (amount == 0) revert ZeroAmount();
+
+            uint256 available = availableForWithdraw(token);
+            if (available < amount) {
+                revert InsufficientAvailableBalance(token, amount, available);
+            }
+        }
+
+        // All checks passed - execute withdrawals
+        for (uint256 i = 0; i < _tokens.length; i++) {
+            address token = _tokens[i];
+            uint256 amount = _amounts[i];
+
+            // Transfer tokens to receiver
+            SafeERC20.safeTransfer(IERC20(token), _receiver, amount);
+
+            // Update principal tracking
+            _deposits[token] -= amount;
+        }
+
+        // Emit event
+        emit Withdrawn(_tokens, _amounts, _receiver, block.timestamp);
+    }
+
+    /**
+     * @notice Get withdrawal request details for an asset
+     * @dev Returns empty struct if no request exists
+     * @param asset Asset address to query
+     * @return request Withdrawal request details
+     */
+    function getWithdrawalRequest(address asset) external view returns (WithdrawalRequest memory request) {
+        return _withdrawalRequests[asset];
+    }
+
+    /**
+     * @notice Get current vault shares held by this contract
+     * @dev Reads ERC-4626 share token balance
+     * @return shares Total vault shares owned
+     */
+    function getVaultShares() external view returns (uint256 shares) {
+        return IERC20(vault).balanceOf(address(this));
     }
 
     // ============================================
