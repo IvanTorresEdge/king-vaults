@@ -6,7 +6,7 @@ pragma solidity ^0.8.25;
  * @author King Protocol (https://www.kingprotocol.org)
  * @custom:security-contact security@kingprotocol.com
  * @notice Interface for King Protocol vault implementations
- * @dev Provides standardized interface for all vault types (BoringVault, TokenizedVault, etc.)
+ * @dev Provides standardized interface for all vault types (KingBoringVault, KingTokenizedVault, etc.)
  */
 interface IKingVault {
     // ============================================
@@ -262,8 +262,8 @@ interface IKingVault {
      *      - Minting asset ratio verification
      * @dev Arrays are parallel: _assets[i] corresponds to _amounts[i]
      * @dev Balances include both idle assets in vault and assets deployed to underlying protocols
-     * @dev For BoringVault: returns principal tracked in _deposits mapping (not share value)
-     * @dev For TokenizedVault: may calculate differently based on internal mechanics
+     * @dev For KingBoringVault: returns principal tracked in _deposits mapping (not share value)
+     * @dev For KingTokenizedVault: may calculate differently based on internal mechanics
      * @return _assets Array of registered asset addresses
      * @return _amounts Array of corresponding balances for each asset
      *
@@ -282,8 +282,8 @@ interface IKingVault {
      * @dev Convenience method for querying single asset balance
      * @dev Returns 0 if asset not registered in vault
      * @dev Used by King Protocol core contract for asset-specific balance checks
-     * @dev For BoringVault: returns principal from _deposits[_asset]
-     * @dev For TokenizedVault: may calculate differently based on internal mechanics
+     * @dev For KingBoringVault: returns principal from _deposits[_asset]
+     * @dev For KingTokenizedVault: may calculate differently based on internal mechanics
      * @param _asset Address of the asset to query
      * @return _amount Balance of the specified asset
      *

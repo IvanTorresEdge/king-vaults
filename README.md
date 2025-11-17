@@ -9,7 +9,7 @@ King Vaults enables King Protocol to deploy idle backing assets from the core va
 ### The Solution
 
 - Abstract `KingVault` contract with common treasury logic
-- Concrete implementations: `KingBoringVault` (Veda) and `TokenizedVault` (ERC-4626)
+- Concrete implementations: `KingBoringVault` (Veda) and `KingTokenizedVault` (ERC-4626)
 - Only core vault can deposit/withdraw
 - Launch: 2 Veda instances + 1 Concrete instance
 
@@ -25,7 +25,7 @@ King Vaults enables King Protocol to deploy idle backing assets from the core va
 **Phase I - Smart Contract Development**
 - Timeline: ~2-3 weeks to mainnet launch (post-audit)
 - Target Yield: ~20% APY on $12M in deployable assets
-- Integrations: Veda Finance (BoringVault) + Concrete (ERC-4626)
+- Integrations: Veda Finance (KingBoringVault adapter) + Concrete (ERC-4626)
 
 ## Security
 

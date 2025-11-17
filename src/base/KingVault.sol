@@ -15,7 +15,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
  * @custom:security-contact security@kingprotocol.com
  * @notice Abstract base contract for King Protocol vault implementations
  * @dev Provides common vault infrastructure for multi-token deposits, withdrawals, TVL tracking
- * @dev Specialized vaults (BoringVault, TokenizedVault) extend this contract
+ * @dev Specialized vaults (KingBoringVault, KingTokenizedVault) extend this contract
  */
 abstract contract KingVault is KingVaultStorage, IKingVault {
     // ============================================
