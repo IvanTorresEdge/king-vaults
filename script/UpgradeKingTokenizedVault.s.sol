@@ -4,12 +4,12 @@ pragma solidity ^0.8.25;
 import {BaseKingVaultScript} from "./shared/BaseKingVaultScript.sol";
 import {console} from "forge-std/console.sol";
 import {stdToml} from "forge-std/StdToml.sol";
-import {KingBoringVault} from "../src/vaults/KingBoringVault.sol";
+import {KingTokenizedVault} from "../src/vaults/KingTokenizedVault.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
 /**
- * @title UpgradeKingBoringVault
- * @notice Upgrade script for KingBoringVault with storage layout validation
+ * @title UpgradeKingTokenizedVault
+ * @notice Upgrade script for KingTokenizedVault with storage layout validation
  * @dev Extends BaseKingVaultScript for shared upgrade functionality
  * @dev Supports Ledger (--ledger) and named account (--account) authentication
  * @dev Includes storage layout generation and validation workflow
@@ -19,7 +19,7 @@ import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/U
  * - setupAuth(): Configure authentication (Ledger/named account)
  * - verifyUpgrade(): Verify upgrade was successful
  */
-contract UpgradeKingBoringVault is BaseKingVaultScript {
+contract UpgradeKingTokenizedVault is BaseKingVaultScript {
     using stdToml for string;
 
     // Reuse same structs from deployment script
@@ -33,10 +33,8 @@ contract UpgradeKingBoringVault is BaseKingVaultScript {
         address owner;
         address kingVault;
         address priceProvider;
-        address atomicQueue;
         address vaultAddress;
-        address teller;
-        address accountant;
+        bool isAtomic;
         address[] assets;
     }
 
@@ -45,11 +43,11 @@ contract UpgradeKingBoringVault is BaseKingVaultScript {
     // ============================================
 
     /**
-     * @notice Upgrade KingBoringVault implementation
+     * @notice Upgrade KingTokenizedVault implementation
      * @param vaultId Vault identifier from config/vaults.toml
      */
     function upgrade(string memory vaultId) external {
-        console.log("=== KingBoringVault Upgrade ===");
+        console.log("=== KingTokenizedVault Upgrade ===");
         console.log("Vault ID:", vaultId);
         console.log("");
 
@@ -123,7 +121,7 @@ contract UpgradeKingBoringVault is BaseKingVaultScript {
         string[] memory inputs = new string[](5);
         inputs[0] = "forge";
         inputs[1] = "inspect";
-        inputs[2] = "src/vaults/KingBoringVault.sol:KingBoringVault";
+        inputs[2] = "src/vaults/KingTokenizedVault.sol:KingTokenizedVault";
         inputs[3] = "storage-layout";
         inputs[4] = "--pretty";
 
@@ -140,20 +138,28 @@ contract UpgradeKingBoringVault is BaseKingVaultScript {
         string memory path = string.concat(root, "/config/vaults.toml");
         string memory toml = vm.readFile(path);
 
-        string memory vaultsKey = ".vaults";
-        string[] memory vaultIds = vm.parseTomlKeys(toml, vaultsKey);
+        // Try to find vault by iterating through array indices
+        for (uint256 i = 0; i < 100; i++) {
+            string memory currentKey = string.concat(".vaults[", vm.toString(i), "]");
 
-        for (uint256 i = 0; i < vaultIds.length; i++) {
-            string memory currentKey = string.concat(vaultsKey, ".", vm.toString(i));
-            string memory currentId = vm.parseTomlString(toml, string.concat(currentKey, ".id"));
+            try vm.parseTomlString(toml, string.concat(currentKey, ".id")) returns (string memory currentId) {
+                if (keccak256(abi.encodePacked(currentId)) == keccak256(abi.encodePacked(vaultId))) {
+                    // Check vault type - only accept KingTokenizedVault
+                    string memory vaultType = vm.parseTomlString(toml, string.concat(currentKey, ".type"));
+                    if (keccak256(abi.encodePacked(vaultType)) != keccak256(abi.encodePacked("KingTokenizedVault"))) {
+                        revert(
+                            string.concat("Vault type mismatch: expected 'KingTokenizedVault', got '", vaultType, "'")
+                        );
+                    }
 
-            if (keccak256(abi.encodePacked(currentId)) == keccak256(abi.encodePacked(vaultId))) {
-                config.id = currentId;
-                config.network = vm.parseTomlUint(toml, string.concat(currentKey, ".network"));
-                config.vaultAddress = vm.parseTomlAddress(toml, string.concat(currentKey, ".vault_address"));
-                config.teller = vm.parseTomlAddress(toml, string.concat(currentKey, ".teller"));
-                config.accountant = vm.parseTomlAddress(toml, string.concat(currentKey, ".accountant"));
-                return config;
+                    config.id = currentId;
+                    config.network = vm.parseTomlUint(toml, string.concat(currentKey, ".network"));
+                    config.vaultAddress = vm.parseTomlAddress(toml, string.concat(currentKey, ".vault_address"));
+                    config.isAtomic = vm.parseTomlBool(toml, string.concat(currentKey, ".is_atomic"));
+                    return config;
+                }
+            } catch {
+                break;
             }
         }
 
@@ -165,7 +171,7 @@ contract UpgradeKingBoringVault is BaseKingVaultScript {
     // ============================================
 
     function deployImplementation(VaultConfig memory config) internal returns (address implementation) {
-        KingBoringVault impl = new KingBoringVault(config.vaultAddress, config.teller, config.accountant);
+        KingTokenizedVault impl = new KingTokenizedVault(config.vaultAddress, config.isAtomic);
 
         return address(impl);
     }

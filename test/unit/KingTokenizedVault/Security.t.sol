@@ -407,8 +407,6 @@ contract KingTokenizedVault_SecurityTest is Test {
         vm.prank(owner);
         tokenizedVault.harvestProfits();
 
-        uint256 balanceAfterFirstHarvest = weth.balanceOf(address(tokenizedVault));
-
         // Second harvest attempt should fail (no more profit after first harvest)
         vm.prank(owner);
         vm.expectRevert(KingTokenizedVault.NoProfitToHarvest.selector);
@@ -461,6 +459,7 @@ contract KingTokenizedVault_SecurityTest is Test {
 
         // Verify donation doesn't create false profit
         // (profit calculation uses convertToAssets on owned shares)
+        assertEq(profit, 0, "Donation should not create false profit");
     }
 
     // ============================================

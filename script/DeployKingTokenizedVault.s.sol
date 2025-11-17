@@ -4,12 +4,12 @@ pragma solidity ^0.8.25;
 import {BaseKingVaultScript} from "./shared/BaseKingVaultScript.sol";
 import {console} from "forge-std/console.sol";
 import {stdToml} from "forge-std/StdToml.sol";
-import {KingBoringVault} from "../src/vaults/KingBoringVault.sol";
+import {KingTokenizedVault} from "../src/vaults/KingTokenizedVault.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 /**
- * @title DeployKingBoringVault
- * @notice Deployment script for KingBoringVault with TOML configuration
+ * @title DeployKingTokenizedVault
+ * @notice Deployment script for KingTokenizedVault with TOML configuration
  * @dev Extends BaseKingVaultScript for shared deployment functionality
  * @dev Supports Ledger (--ledger) and named account (--account) authentication
  * @dev Zero private keys - all authentication via Foundry keystore or hardware wallet
@@ -21,7 +21,7 @@ import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.s
  * - setupProfitsDistribution(): Configure profit distribution
  * - verifyContracts(): Verify contracts on Etherscan
  */
-contract DeployKingBoringVault is BaseKingVaultScript {
+contract DeployKingTokenizedVault is BaseKingVaultScript {
     using stdToml for string;
 
     // ============================================
@@ -38,10 +38,8 @@ contract DeployKingBoringVault is BaseKingVaultScript {
         address owner;
         address kingVault;
         address priceProvider;
-        address atomicQueue;
-        address vaultAddress; // Veda BoringVault (immutable)
-        address teller; // Veda Teller (immutable)
-        address accountant; // Veda Accountant (immutable)
+        address vaultAddress; // ERC-4626 vault (immutable)
+        bool isAtomic; // Withdrawal mode (immutable)
         address[] assets;
         address[] profitRecipients;
         uint16[] profitPercentsBPS;
@@ -64,11 +62,11 @@ contract DeployKingBoringVault is BaseKingVaultScript {
     // ============================================
 
     /**
-     * @notice Deploy KingBoringVault with configuration from TOML
+     * @notice Deploy KingTokenizedVault with configuration from TOML
      * @param vaultId Vault identifier from config/vaults.toml
      */
     function deploy(string memory vaultId) external {
-        console.log("=== KingBoringVault Deployment ===");
+        console.log("=== KingTokenizedVault Deployment ===");
         console.log("Vault ID:", vaultId);
         console.log("");
 
@@ -80,6 +78,8 @@ contract DeployKingBoringVault is BaseKingVaultScript {
 
         console.log("  Network:", config.network);
         console.log("  Owner:", config.owner);
+        console.log("  ERC-4626 Vault:", config.vaultAddress);
+        console.log("  Mode:", config.isAtomic ? "Atomic" : "Async");
         console.log("  Assets:", config.assets.length);
         console.log("");
 
@@ -157,7 +157,7 @@ contract DeployKingBoringVault is BaseKingVaultScript {
 
     /**
      * @notice Load vault configuration from TOML file
-     * @param vaultId Vault identifier (e.g., "boring-vault-sethfi")
+     * @param vaultId Vault identifier (e.g., "tokenized-vault-concrete-atomic")
      * @return config Parsed vault configuration
      */
     function loadVaultConfig(string memory vaultId) internal view returns (VaultConfig memory config) {
@@ -175,20 +175,26 @@ contract DeployKingBoringVault is BaseKingVaultScript {
             try vm.parseTomlString(toml, string.concat(currentKey, ".id")) returns (string memory currentId) {
                 // Check if this is the vault we're looking for
                 if (keccak256(abi.encodePacked(currentId)) == keccak256(abi.encodePacked(vaultId))) {
+                    // Check vault type - only accept KingTokenizedVault
+                    string memory vaultType = vm.parseTomlString(toml, string.concat(currentKey, ".type"));
+                    if (keccak256(abi.encodePacked(vaultType)) != keccak256(abi.encodePacked("KingTokenizedVault"))) {
+                        revert(
+                            string.concat("Vault type mismatch: expected 'KingTokenizedVault', got '", vaultType, "'")
+                        );
+                    }
+
                     // Found matching vault - parse all fields
                     config.id = currentId;
                     config.network = vm.parseTomlUint(toml, string.concat(currentKey, ".network"));
-                    config.vaultType = vm.parseTomlString(toml, string.concat(currentKey, ".type"));
+                    config.vaultType = vaultType;
                     config.name = vm.parseTomlString(toml, string.concat(currentKey, ".name"));
                     config.symbol = vm.parseTomlString(toml, string.concat(currentKey, ".symbol"));
                     config.decimals = uint8(vm.parseTomlUint(toml, string.concat(currentKey, ".decimals")));
                     config.owner = vm.parseTomlAddress(toml, string.concat(currentKey, ".owner"));
                     config.kingVault = vm.parseTomlAddress(toml, string.concat(currentKey, ".king_vault"));
                     config.priceProvider = vm.parseTomlAddress(toml, string.concat(currentKey, ".price_provider"));
-                    config.atomicQueue = vm.parseTomlAddress(toml, string.concat(currentKey, ".atomic_queue"));
                     config.vaultAddress = vm.parseTomlAddress(toml, string.concat(currentKey, ".vault_address"));
-                    config.teller = vm.parseTomlAddress(toml, string.concat(currentKey, ".teller"));
-                    config.accountant = vm.parseTomlAddress(toml, string.concat(currentKey, ".accountant"));
+                    config.isAtomic = vm.parseTomlBool(toml, string.concat(currentKey, ".is_atomic"));
                     config.assets = vm.parseTomlAddressArray(toml, string.concat(currentKey, ".assets"));
 
                     // Parse profit distribution (optional)
@@ -230,10 +236,7 @@ contract DeployKingBoringVault is BaseKingVaultScript {
         require(config.owner != address(0), "Invalid owner address");
         require(config.kingVault != address(0), "Invalid king vault address");
         require(config.priceProvider != address(0), "Invalid price provider address");
-        require(config.atomicQueue != address(0), "Invalid atomic queue address");
-        require(config.vaultAddress != address(0), "Invalid vault address");
-        require(config.teller != address(0), "Invalid teller address");
-        require(config.accountant != address(0), "Invalid accountant address");
+        require(config.vaultAddress != address(0), "Invalid ERC-4626 vault address");
         require(config.assets.length > 0, "No assets configured");
     }
 
@@ -247,10 +250,9 @@ contract DeployKingBoringVault is BaseKingVaultScript {
      * @return implementation Address of deployed implementation
      */
     function deployImplementation(VaultConfig memory config) internal returns (address implementation) {
-        KingBoringVault impl = new KingBoringVault(
-            config.vaultAddress, // vault (immutable)
-            config.teller, // teller (immutable)
-            config.accountant // accountant (immutable)
+        KingTokenizedVault impl = new KingTokenizedVault(
+            config.vaultAddress, // ERC-4626 vault (immutable)
+            config.isAtomic // Withdrawal mode (immutable)
         );
 
         return address(impl);
@@ -265,11 +267,10 @@ contract DeployKingBoringVault is BaseKingVaultScript {
     function deployProxy(address implementation, VaultConfig memory config) internal returns (address proxy) {
         // Encode initialization data
         bytes memory initData = abi.encodeWithSelector(
-            KingBoringVault.initialize.selector,
+            KingTokenizedVault.initialize.selector,
             config.owner,
             config.kingVault,
             config.priceProvider,
-            config.atomicQueue,
             new address[](0), // No assets during init
             new bool[](0) // Will register separately
         );
@@ -290,7 +291,7 @@ contract DeployKingBoringVault is BaseKingVaultScript {
         // This function exists for logging/verification purposes
 
         // Verify initialization
-        KingBoringVault vault = KingBoringVault(payable(proxy));
+        KingTokenizedVault vault = KingTokenizedVault(payable(proxy));
         require(vault.owner() == config.owner, "Owner mismatch");
         require(vault.kingVault() == config.kingVault, "King vault mismatch");
     }
@@ -314,7 +315,7 @@ contract DeployKingBoringVault is BaseKingVaultScript {
         console.log("");
         console.log("Vault:", vaultId);
         console.log("Implementation:", implementation);
-        console.log("Proxy (KingBoringVault):", proxy);
+        console.log("Proxy (KingTokenizedVault):", proxy);
         console.log("Gas used:", gasUsed);
         console.log("");
 

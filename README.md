@@ -60,7 +60,21 @@ King Vaults uses a secure, hardware-wallet-friendly deployment automation system
 
 ### Quick Start
 
-1. **Configure vaults** in `config/vaults.toml`:
+1. **Set up environment variables** (credentials are NOT stored in config files):
+   ```shell
+   # Copy example file
+   cp .env.example .env
+
+   # Edit .env with your credentials
+   # For Ethereum Mainnet (Chain ID: 1)
+   RPC_URL_1=https://mainnet.infura.io/v3/YOUR_INFURA_KEY
+   ETHERSCAN_API_KEY_1=YOUR_ETHERSCAN_API_KEY
+
+   # Load environment variables
+   source .env
+   ```
+
+2. **Configure vaults** in `config/vaults.toml`:
    ```toml
    [[vaults]]
    id = "boring-vault-sethfi"
@@ -68,20 +82,20 @@ King Vaults uses a secure, hardware-wallet-friendly deployment automation system
    # ... set all addresses
    ```
 
-2. **Simulate deployment** (dry run):
+3. **Simulate deployment** (dry run):
    ```shell
    forge script script/DeployKingBoringVault.s.sol \
      --sig "deploy(string)" "boring-vault-sethfi"
    ```
 
-3. **Deploy with Ledger** (mainnet):
+4. **Deploy with Ledger** (mainnet):
    ```shell
    forge script script/DeployKingBoringVault.s.sol \
      --sig "deploy(string)" "boring-vault-sethfi" \
      --ledger --broadcast --verify
    ```
 
-4. **Deploy with named account** (testnet):
+5. **Deploy with named account** (testnet):
    ```shell
    forge script script/DeployKingBoringVault.s.sol \
      --sig "deploy(string)" "boring-vault-sethfi" \

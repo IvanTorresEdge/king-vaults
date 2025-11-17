@@ -31,7 +31,7 @@ contract MockERC4626Vault is ERC4626 {
     /**
      * @notice Override to use custom exchange rate
      */
-    function _convertToAssets(uint256 shares, Math.Rounding rounding)
+    function _convertToAssets(uint256 shares, Math.Rounding /* rounding */ )
         internal
         view
         virtual
@@ -44,7 +44,7 @@ contract MockERC4626Vault is ERC4626 {
     /**
      * @notice Override to use custom exchange rate
      */
-    function _convertToShares(uint256 assets, Math.Rounding rounding)
+    function _convertToShares(uint256 assets, Math.Rounding /* rounding */ )
         internal
         view
         virtual

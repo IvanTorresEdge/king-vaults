@@ -193,7 +193,7 @@ contract KingTokenizedVault_ForkTest is Test {
      *      - Underlying asset matches expected token
      *      - Vault is operational (not paused)
      */
-    function test_fork_vaultConnection() public skipIfNotConfigured {
+    function test_fork_vaultConnection() public view skipIfNotConfigured {
         assertEq(tokenizedVault.vault(), CONCRETE_WETH_VAULT, "Should connect to Concrete vault");
         assertEq(address(underlyingAsset), concreteVault.asset(), "Underlying asset should match");
         assertGt(concreteVault.totalAssets(), 0, "Concrete vault should have assets deployed");
@@ -466,7 +466,7 @@ contract KingTokenizedVault_ForkTest is Test {
      *
      * NOTE: Requires CONCRETE_USDC_VAULT to be configured
      */
-    function test_fork_multiAssetDeployment() public {
+    function test_fork_multiAssetDeployment() public pure {
         if (CONCRETE_USDC_VAULT == address(0)) {
             console2.log("Skipping multi-asset test: USDC vault not configured");
             return;
@@ -488,7 +488,7 @@ contract KingTokenizedVault_ForkTest is Test {
      *      - Decimals match underlying asset
      *      - Asset address is correct
      */
-    function test_fork_concreteVaultMetadata() public skipIfNotConfigured {
+    function test_fork_concreteVaultMetadata() public view skipIfNotConfigured {
         // Verify ERC-4626 metadata
         assertEq(concreteVault.asset(), address(underlyingAsset), "Asset should match");
 
@@ -510,7 +510,7 @@ contract KingTokenizedVault_ForkTest is Test {
      *      - maxDeposit returns reasonable limit
      *      - maxWithdraw reflects available liquidity
      */
-    function test_fork_concreteVaultLimits() public skipIfNotConfigured {
+    function test_fork_concreteVaultLimits() public view skipIfNotConfigured {
         uint256 maxDeposit = concreteVault.maxDeposit(address(tokenizedVault));
         uint256 maxWithdraw = concreteVault.maxWithdraw(address(tokenizedVault));
 

@@ -1061,8 +1061,6 @@ contract KingTokenizedVault_ProfitsTest is Test {
 
         // Second profit cycle: additional 33% appreciation from current level
         // Remaining shares should appreciate further
-        uint256 remainingShares = tokenizedVault.getVaultShares();
-
         // Set even higher rate for second cycle
         erc4626Vault.setExchangeRate(2.0e18);
 
