@@ -450,6 +450,8 @@ contract KingTokenizedVault_IntegrationTest is Test {
         assertEq(tokenizedVault.getBalance(address(weth)), initialDeposit, "Principal unchanged");
 
         // Step 3: Flow B - Simulate profit (20% appreciation)
+        // Fund vault to back the appreciation: 50 ether * 1.2 = 60 ether needed, so mint 10 more
+        weth.mint(address(erc4626Vault), 10 ether);
         erc4626Vault.setExchangeRate(1.2e18);
         uint256 profit = tokenizedVault.calculateProfit();
         assertGt(profit, 0, "Profit generated");
@@ -557,6 +559,8 @@ contract KingTokenizedVault_IntegrationTest is Test {
      *      - No assets lost in transfers
      */
     function test_accounting_noAssetLeakage() public {
+        // Fund kingVault with extra WETH for this test
+        weth.mint(kingVault, 40 ether);
         uint256 initialKingVaultBalance = weth.balanceOf(kingVault);
 
         // Deposit

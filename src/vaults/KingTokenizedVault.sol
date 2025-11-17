@@ -409,11 +409,13 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
             }
 
             // Track in appropriate queue based on type
+            // IMPORTANT: In atomic mode, only profit withdrawals are queued for distribution
+            // Principal withdrawals complete immediately and assets become available for Flow A withdrawal
             if (isProfitWithdrawal) {
                 _queuedProfits[asset] += assetsReceived;
-            } else {
-                _queuedWithdraw[asset] += assetsReceived;
             }
+            // Note: Principal withdrawals (isProfitWithdrawal=false) do NOT queue in atomic mode
+            // Assets are immediately available for withdrawal to kingVault via withdraw()
 
             // Emit completion event
             emit WithdrawalConfirmed(asset, assetsReceived);

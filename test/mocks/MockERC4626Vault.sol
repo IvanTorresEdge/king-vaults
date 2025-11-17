@@ -53,4 +53,35 @@ contract MockERC4626Vault is ERC4626 {
     {
         return (assets * 1e18) / _exchangeRate;
     }
+
+    /**
+     * @notice Mint shares directly for testing (e.g., donation attacks)
+     * @param to Address to mint shares to
+     * @param amount Amount of shares to mint
+     */
+    function mint(address to, uint256 amount) external {
+        _mint(to, amount);
+    }
+
+    /**
+     * @notice Override deposit to simulate slippage attacks
+     * @dev Returns slightly fewer shares than preview to test slippage protection
+     */
+    uint256 private _depositSlippageBPS = 0;
+
+    function setDepositSlippage(uint256 slippageBPS) external {
+        _depositSlippageBPS = slippageBPS;
+    }
+
+    function deposit(uint256 assets, address receiver) public virtual override returns (uint256 shares) {
+        shares = previewDeposit(assets);
+
+        // Apply slippage if configured (simulate unfavorable conditions)
+        if (_depositSlippageBPS > 0) {
+            shares = (shares * (10000 - _depositSlippageBPS)) / 10000;
+        }
+
+        _deposit(_msgSender(), receiver, assets, shares);
+        return shares;
+    }
 }

@@ -151,9 +151,15 @@ contract KingTokenizedVault_StoragePatternTest is Test {
      * @dev Verifies asset registration from KingVaultStorage
      */
     function test_storageInheritance_AssetsArrayAccessible() public {
+        // Create additional mock token
+        MockERC20 usdt = new MockERC20("Tether USD", "USDT", 6);
+
+        // Set price in price provider
+        priceProvider.setPrice(address(usdt), 1e18); // 1 USDT = 1 ETH (simplified)
+
         address[] memory assets = new address[](2);
         assets[0] = address(weth);
-        assets[1] = address(0x999);
+        assets[1] = address(usdt);
         bool[] memory accepted = new bool[](2);
         accepted[0] = true;
         accepted[1] = true;
@@ -163,7 +169,7 @@ contract KingTokenizedVault_StoragePatternTest is Test {
         address[] memory registeredAssets = tokenizedVault.assets();
         assertEq(registeredAssets.length, 2, "Should register multiple assets");
         assertEq(registeredAssets[0], address(weth), "First asset should match");
-        assertEq(registeredAssets[1], address(0x999), "Second asset should match");
+        assertEq(registeredAssets[1], address(usdt), "Second asset should match");
     }
 
     // ============================================
@@ -287,10 +293,18 @@ contract KingTokenizedVault_StoragePatternTest is Test {
      * @dev Verifies asset registration during initialization
      */
     function test_initialize_SucceedsWithMultipleAssets() public {
+        // Create additional mock tokens
+        MockERC20 usdc = new MockERC20("USD Coin", "USDC", 6);
+        MockERC20 dai = new MockERC20("Dai Stablecoin", "DAI", 18);
+
+        // Set prices in price provider
+        priceProvider.setPrice(address(usdc), 1e18); // 1 USDC = 1 ETH (simplified)
+        priceProvider.setPrice(address(dai), 1e18); // 1 DAI = 1 ETH (simplified)
+
         address[] memory assets = new address[](3);
         assets[0] = address(weth);
-        assets[1] = address(0x111);
-        assets[2] = address(0x222);
+        assets[1] = address(usdc);
+        assets[2] = address(dai);
         bool[] memory accepted = new bool[](3);
         accepted[0] = true;
         accepted[1] = true;
@@ -314,8 +328,13 @@ contract KingTokenizedVault_StoragePatternTest is Test {
         address[] memory assets = new address[](0);
         bool[] memory accepted = new bool[](0);
 
+        KingTokenizedVault impl = _deployImplementation(true);
+        bytes memory initData = abi.encodeWithSelector(
+            KingTokenizedVault.initialize.selector, address(0), kingVault, address(priceProvider), assets, accepted
+        );
+
         vm.expectRevert(IKingVault.ZeroAddress.selector);
-        _deployTokenizedVault(address(0), kingVault, address(priceProvider), assets, accepted, true);
+        new ERC1967Proxy(address(impl), initData);
     }
 
     /**
@@ -326,8 +345,13 @@ contract KingTokenizedVault_StoragePatternTest is Test {
         address[] memory assets = new address[](0);
         bool[] memory accepted = new bool[](0);
 
+        KingTokenizedVault impl = _deployImplementation(true);
+        bytes memory initData = abi.encodeWithSelector(
+            KingTokenizedVault.initialize.selector, owner, address(0), address(priceProvider), assets, accepted
+        );
+
         vm.expectRevert(IKingVault.ZeroAddress.selector);
-        _deployTokenizedVault(owner, address(0), address(priceProvider), assets, accepted, true);
+        new ERC1967Proxy(address(impl), initData);
     }
 
     /**
@@ -338,8 +362,13 @@ contract KingTokenizedVault_StoragePatternTest is Test {
         address[] memory assets = new address[](0);
         bool[] memory accepted = new bool[](0);
 
+        KingTokenizedVault impl = _deployImplementation(true);
+        bytes memory initData = abi.encodeWithSelector(
+            KingTokenizedVault.initialize.selector, owner, kingVault, address(0), assets, accepted
+        );
+
         vm.expectRevert(IKingVault.ZeroAddress.selector);
-        _deployTokenizedVault(owner, kingVault, address(0), assets, accepted, true);
+        new ERC1967Proxy(address(impl), initData);
     }
 
     // ============================================
