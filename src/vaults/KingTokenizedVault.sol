@@ -6,6 +6,7 @@ import {KingTokenizedVaultStorage} from "./KingTokenizedVaultStorage.sol";
 import {IKingVault} from "../interfaces/IKingVault.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
@@ -262,6 +263,52 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
 
         // Emit initialization event for auditability
         emit Initialized(_owner, _kingVault, _priceProvider, block.timestamp);
+    }
+
+    /**
+     * @notice Deploy idle assets to ERC-4626 vault (atomic mode)
+     * @dev Only callable by owner when not paused
+     * @dev Validates asset, approves vault, deposits and receives shares
+     * @dev Applies slippage protection based on maxSlippageBPS
+     * @param asset ERC-20 token address to deposit
+     * @param amount Asset amount to deposit
+     * @return shares Amount of vault shares received
+     */
+    function depositToVault(address asset, uint256 amount)
+        external
+        onlyOwner
+        whenNotPaused
+        returns (uint256 shares)
+    {
+        // Validate amount
+        if (amount == 0) revert ZeroAmount();
+
+        // Validate asset is registered
+        if (!_registeredTokens[asset]) revert AssetNotAccepted(asset);
+
+        // Check sufficient idle balance
+        uint256 idle = IERC20(asset).balanceOf(address(this));
+        if (idle < amount) {
+            revert InsufficientAvailableBalance(asset, amount, idle);
+        }
+
+        // Preview expected shares and calculate minimum acceptable
+        uint256 expectedShares = IERC4626(vault).convertToShares(amount);
+        uint256 minShares = Math.mulDiv(expectedShares, 10_000 - maxSlippageBPS, 10_000);
+
+        // Approve vault to spend assets
+        SafeERC20.forceApprove(IERC20(asset), vault, amount);
+
+        // Deposit to ERC-4626 vault and receive shares
+        shares = IERC4626(vault).deposit(amount, address(this));
+
+        // Validate slippage protection
+        if (shares < minShares) {
+            revert SlippageExceeded(expectedShares, shares);
+        }
+
+        // Emit deposit event
+        emit DepositCompleted(asset, amount, shares);
     }
 
     // ============================================
