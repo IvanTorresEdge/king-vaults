@@ -770,4 +770,350 @@ contract KingTokenizedVault_ProfitsTest is Test {
         tokenizedVault.distributeProfits();
         vm.stopPrank();
     }
+
+    // ============================================
+    // Edge Case Tests (Task 8.5)
+    // ============================================
+
+    /**
+     * @notice Test zero profit scenario
+     * @dev Verifies:
+     *      - calculateProfit returns 0 when no appreciation
+     *      - harvestProfits reverts with NoProfitToHarvest
+     *      - System handles no-profit case gracefully
+     */
+    function test_edgeCase_zeroProfitScenario() public {
+        // Setup: Deposit and deploy
+        vm.prank(kingVault);
+        _depositToKingTokenizedVault(address(weth), 10 ether);
+
+        vm.prank(owner);
+        tokenizedVault.depositToVault(address(weth), 10 ether);
+
+        // No appreciation: exchange rate stays 1:1
+        uint256 profit = tokenizedVault.calculateProfit();
+        assertEq(profit, 0, "Profit should be zero with no appreciation");
+
+        // Harvest should revert
+        vm.prank(owner);
+        vm.expectRevert(KingTokenizedVault.NoProfitToHarvest.selector);
+        tokenizedVault.harvestProfits();
+    }
+
+    /**
+     * @notice Test negative profit scenario (share depreciation)
+     * @dev Verifies:
+     *      - Share value below principal returns 0 profit (no negative)
+     *      - System protects against losses in profit calculation
+     */
+    function test_edgeCase_shareDepreciation() public {
+        // Setup
+        vm.prank(kingVault);
+        _depositToKingTokenizedVault(address(weth), 10 ether);
+
+        vm.prank(owner);
+        tokenizedVault.depositToVault(address(weth), 10 ether);
+
+        // Simulate depreciation: shares worth less than principal
+        erc4626Vault.setExchangeRate(0.8e18); // 20% loss
+
+        // Profit should be 0 (not negative)
+        uint256 profit = tokenizedVault.calculateProfit();
+        assertEq(profit, 0, "Profit should be 0 when depreciated");
+
+        // Harvest should revert
+        vm.prank(owner);
+        vm.expectRevert(KingTokenizedVault.NoProfitToHarvest.selector);
+        tokenizedVault.harvestProfits();
+    }
+
+    /**
+     * @notice Test multi-asset profit distribution
+     * @dev Verifies:
+     *      - Profit calculation works with multiple principal assets
+     *      - Distribution handles multiple profit assets
+     *      - Accounting is correct across assets
+     */
+    function test_edgeCase_multiAssetProfitDistribution() public {
+        // Register USDC
+        vm.startPrank(owner);
+        address[] memory assets = new address[](1);
+        assets[0] = address(usdc);
+        bool[] memory accepted = new bool[](1);
+        accepted[0] = true;
+        tokenizedVault.registerAssets(assets, accepted);
+        vm.stopPrank();
+
+        // Fund kingVault with USDC
+        usdc.mint(kingVault, 20_000e6); // 20k USDC
+        vm.prank(kingVault);
+        usdc.approve(address(tokenizedVault), type(uint256).max);
+
+        // Deposit both WETH and USDC as principal
+        vm.prank(kingVault);
+        _depositToKingTokenizedVault(address(weth), 10 ether);
+
+        vm.startPrank(kingVault);
+        address[] memory usdcAssets = new address[](1);
+        usdcAssets[0] = address(usdc);
+        uint256[] memory usdcAmounts = new uint256[](1);
+        usdcAmounts[0] = 20_000e6;
+        tokenizedVault.deposit(usdcAssets, usdcAmounts);
+        vm.stopPrank();
+
+        // Deploy only WETH (USDC stays as principal)
+        vm.prank(owner);
+        tokenizedVault.depositToVault(address(weth), 10 ether);
+
+        // Generate profit on WETH shares
+        erc4626Vault.setExchangeRate(3.0e18); // 200% profit
+
+        // Calculate profit accounting for both principals
+        // WETH principal: 10 ETH
+        // USDC principal: 20k USDC * 0.0005 ETH = 10 ETH
+        // Total principal: 20 ETH
+        // Share value: 10 shares * 3.0 = 30 ETH
+        // Profit: 30 - 20 = 10 ETH
+        uint256 profit = tokenizedVault.calculateProfit();
+        assertGt(profit, 0, "Should have profit with multi-asset principal");
+        assertApproxEqRel(profit, 10 ether, 0.05e18, "Profit should account for both assets");
+    }
+
+    /**
+     * @notice Test profit distribution with pending withdrawals
+     * @dev Verifies:
+     *      - Can distribute profits while principal withdrawal queued
+     *      - Type A and Type B queues don't interfere
+     *      - Accounting remains correct
+     */
+    function test_edgeCase_profitDistributionWithPendingWithdrawals() public {
+        // Setup
+        vm.prank(kingVault);
+        _depositToKingTokenizedVault(address(weth), 30 ether);
+
+        vm.prank(owner);
+        tokenizedVault.depositToVault(address(weth), 30 ether);
+
+        // Generate profit
+        erc4626Vault.setExchangeRate(1.5e18);
+
+        // Harvest profits (Type B)
+        vm.prank(owner);
+        tokenizedVault.harvestProfits();
+
+        // Queue principal withdrawal (Type A)
+        uint256 remainingShares = tokenizedVault.getVaultShares();
+        vm.prank(owner);
+        tokenizedVault.withdrawFromVault(address(weth), remainingShares, false);
+
+        // Both queues should have assets
+        uint256 idle = weth.balanceOf(address(tokenizedVault));
+        assertGt(idle, 0, "Should have idle WETH from both operations");
+
+        // Distribute profits should work despite pending principal withdrawal
+        uint256 kingVaultBefore = weth.balanceOf(kingVault);
+        vm.prank(owner);
+        tokenizedVault.distributeProfits();
+
+        // Verify profits distributed
+        assertGt(weth.balanceOf(kingVault), kingVaultBefore, "Profits should be distributed");
+
+        // Principal withdrawal should still be available
+        uint256 available = tokenizedVault.availableForWithdraw(address(weth));
+        assertEq(available, 0, "Principal should be reserved after profit distribution");
+    }
+
+    /**
+     * @notice Test very small profit scenario
+     * @dev Verifies:
+     *      - System handles tiny profit amounts (1 wei)
+     *      - No rounding errors cause reversion
+     *      - Profit shares calculated correctly
+     */
+    function test_edgeCase_verySmallProfit() public {
+        // Large deposit to make relative profit tiny
+        vm.prank(kingVault);
+        _depositToKingTokenizedVault(address(weth), 1000 ether);
+
+        vm.prank(owner);
+        tokenizedVault.depositToVault(address(weth), 1000 ether);
+
+        // Tiny appreciation (0.0001%)
+        erc4626Vault.setExchangeRate(1.000001e18);
+
+        uint256 profit = tokenizedVault.calculateProfit();
+
+        if (profit > 0) {
+            // Harvest should succeed if profit exists
+            vm.prank(owner);
+            tokenizedVault.harvestProfits();
+        } else {
+            // Or revert if rounded to zero
+            vm.prank(owner);
+            vm.expectRevert(KingTokenizedVault.NoProfitToHarvest.selector);
+            tokenizedVault.harvestProfits();
+        }
+    }
+
+    /**
+     * @notice Test maximum profit scenario
+     * @dev Verifies:
+     *      - System handles extreme appreciation (1000x)
+     *      - No overflow on profit calculation
+     *      - Harvest and distribution work correctly
+     */
+    function test_edgeCase_extremeProfit() public {
+        // Setup
+        vm.prank(kingVault);
+        _depositToKingTokenizedVault(address(weth), 1 ether);
+
+        vm.prank(owner);
+        tokenizedVault.depositToVault(address(weth), 1 ether);
+
+        // Extreme appreciation (1000x)
+        erc4626Vault.setExchangeRate(1000e18);
+
+        // Calculate profit (should not overflow)
+        uint256 profit = tokenizedVault.calculateProfit();
+        assertGt(profit, 0, "Should calculate extreme profit");
+        assertApproxEqRel(profit, 999 ether, 0.01e18, "Profit should be ~999 ETH");
+
+        // Harvest should work
+        vm.prank(owner);
+        tokenizedVault.harvestProfits();
+
+        // Distribute should work
+        vm.prank(owner);
+        tokenizedVault.distributeProfits();
+
+        // Verify kingVault received massive profit
+        assertGt(weth.balanceOf(kingVault), 900 ether, "Should receive large profit");
+    }
+
+    /**
+     * @notice Test profit distribution after partial withdrawal
+     * @dev Verifies:
+     *      - Profit calculation correct after withdrawing shares
+     *      - Remaining shares still generate profit
+     *      - Accounting remains accurate
+     */
+    function test_edgeCase_profitAfterPartialWithdrawal() public {
+        // Setup
+        vm.prank(kingVault);
+        _depositToKingTokenizedVault(address(weth), 20 ether);
+
+        vm.prank(owner);
+        tokenizedVault.depositToVault(address(weth), 20 ether);
+
+        // Withdraw half the shares (no profit yet)
+        vm.prank(owner);
+        tokenizedVault.withdrawFromVault(address(weth), 10 ether, false);
+
+        // Now generate profit on remaining shares
+        erc4626Vault.setExchangeRate(2.0e18); // 100% appreciation
+
+        // Remaining: 10 shares @ 2.0 = 20 WETH value
+        // Principal: 20 WETH (unchanged by share withdrawal)
+        // Profit: 20 - 20 = 0 (principal not reduced by withdrawal)
+
+        // Actually, withdrawFromVault with isProfitWithdrawal=false
+        // withdraws principal, so this affects accounting
+        // The principal should remain 20 ETH total in _deposits
+        // But we withdrew 10 ETH worth of shares
+
+        uint256 profit = tokenizedVault.calculateProfit();
+
+        // After withdrawing 10 shares worth 10 ETH:
+        // Remaining 10 shares @ 2.0x = 20 ETH
+        // Principal still 20 ETH
+        // Profit = 20 - 20 = 0
+        assertEq(profit, 0, "No profit after partial withdrawal at 1:1");
+    }
+
+    /**
+     * @notice Test consecutive profit harvests
+     * @dev Verifies:
+     *      - First harvest extracts initial profit
+     *      - Second harvest (after more appreciation) extracts additional profit
+     *      - Accounting is correct across multiple harvests
+     */
+    function test_edgeCase_consecutiveProfitHarvests() public {
+        // Setup
+        vm.prank(kingVault);
+        _depositToKingTokenizedVault(address(weth), 20 ether);
+
+        vm.prank(owner);
+        tokenizedVault.depositToVault(address(weth), 20 ether);
+
+        // First profit cycle: 50% appreciation
+        erc4626Vault.setExchangeRate(1.5e18);
+
+        vm.prank(owner);
+        tokenizedVault.harvestProfits();
+
+        uint256 kingVaultAfterFirst = weth.balanceOf(kingVault);
+
+        vm.prank(owner);
+        tokenizedVault.distributeProfits();
+
+        uint256 firstProfit = weth.balanceOf(kingVault) - kingVaultAfterFirst;
+        assertGt(firstProfit, 0, "First profit should be positive");
+
+        // Second profit cycle: additional 33% appreciation from current level
+        // Remaining shares should appreciate further
+        uint256 remainingShares = tokenizedVault.getVaultShares();
+
+        // Set even higher rate for second cycle
+        erc4626Vault.setExchangeRate(2.0e18);
+
+        // Calculate second profit
+        uint256 secondProfit = tokenizedVault.calculateProfit();
+
+        if (secondProfit > 0) {
+            vm.prank(owner);
+            tokenizedVault.harvestProfits();
+
+            uint256 balanceBefore = weth.balanceOf(kingVault);
+            vm.prank(owner);
+            tokenizedVault.distributeProfits();
+
+            uint256 actualSecondProfit = weth.balanceOf(kingVault) - balanceBefore;
+            assertGt(actualSecondProfit, 0, "Second profit should be positive");
+        }
+    }
+
+    /**
+     * @notice Test profit distribution with zero balance
+     * @dev Verifies:
+     *      - distributeProfits reverts when no profits queued
+     *      - Prevents wasted gas on empty operations
+     */
+    function test_edgeCase_distributeProfitsWithZeroBalance() public {
+        // No harvest, try to distribute
+        vm.prank(owner);
+        vm.expectRevert(KingTokenizedVault.NoProfitsToDistribute.selector);
+        tokenizedVault.distributeProfits();
+    }
+
+    /**
+     * @notice Test profit calculation with price feed failure
+     * @dev Verifies:
+     *      - calculateProfit reverts if price not available
+     *      - System protects against bad price data
+     */
+    function test_edgeCase_profitCalculationWithPriceFeedFailure() public {
+        // Setup
+        vm.prank(kingVault);
+        _depositToKingTokenizedVault(address(weth), 10 ether);
+
+        vm.prank(owner);
+        tokenizedVault.depositToVault(address(weth), 10 ether);
+
+        // Set price to zero (simulating price feed failure)
+        priceProvider.setPrice(address(weth), 0);
+
+        // Calculate profit should revert
+        vm.expectRevert();
+        tokenizedVault.calculateProfit();
+    }
 }

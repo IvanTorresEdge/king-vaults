@@ -529,7 +529,7 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
      * @notice Calculate available balance for withdrawals to main vault (override)
      * @dev Returns idle balance minus queued operations (principal + profit withdrawals)
      * @dev Protects assets reserved for Type A (principal) and Type B (profit) operations
-     * @param asset Asset address to check
+     * @param _asset Asset address to check
      * @return Available amount that can be safely withdrawn to main vault
      *
      * @custom:formula available = idle - queuedPrincipal - queuedProfit
