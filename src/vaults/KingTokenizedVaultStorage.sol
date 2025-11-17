@@ -117,10 +117,10 @@ abstract contract KingTokenizedVaultStorage is KingVaultStorage {
      * @param isProfitWithdrawal Type A (false) or Type B (true) withdrawal
      */
     struct WithdrawalRequest {
-        address asset;      // Asset we expect to receive
-        uint256 shares;     // Share amount committed to withdrawal
-        uint256 expected;   // Expected asset amount
-        uint64 deadline;    // Request deadline timestamp (async mode)
+        address asset; // Asset we expect to receive
+        uint256 shares; // Share amount committed to withdrawal
+        uint256 expected; // Expected asset amount
+        uint64 deadline; // Request deadline timestamp (async mode)
         bool isProfitWithdrawal; // Type A (false) or Type B (true)
     }
 

@@ -15,10 +15,7 @@ contract MockERC4626Vault is ERC4626 {
     // Override exchange rate (1e18 = 1:1 ratio)
     uint256 private _exchangeRate;
 
-    constructor(IERC20 asset_, string memory name_, string memory symbol_)
-        ERC4626(asset_)
-        ERC20(name_, symbol_)
-    {
+    constructor(IERC20 asset_, string memory name_, string memory symbol_) ERC4626(asset_) ERC20(name_, symbol_) {
         _exchangeRate = 1e18; // Start at 1:1
     }
 

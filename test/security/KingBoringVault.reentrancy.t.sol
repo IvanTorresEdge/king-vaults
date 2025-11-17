@@ -79,12 +79,10 @@ contract KingBoringVaultReentrancyTest is Test {
         _setupProfitDistribution();
     }
 
-    function _deployKingBoringVault(
-        address _owner,
-        address _kingVault,
-        address _priceProvider,
-        address _atomicQueue
-    ) internal returns (KingBoringVault) {
+    function _deployKingBoringVault(address _owner, address _kingVault, address _priceProvider, address _atomicQueue)
+        internal
+        returns (KingBoringVault)
+    {
         address[] memory tokens = new address[](1);
         tokens[0] = address(weth);
         bool[] memory accepted = new bool[](1);
@@ -570,7 +568,8 @@ contract KingBoringVaultReentrancyTest is Test {
         // Deploy vault with malicious teller
         maliciousTeller = new MaliciousTeller(address(vaultToken));
 
-        KingBoringVault testVault = new KingBoringVault(address(vaultToken), address(maliciousTeller), address(accountant));
+        KingBoringVault testVault =
+            new KingBoringVault(address(vaultToken), address(maliciousTeller), address(accountant));
 
         MockAtomicQueue queue = new MockAtomicQueue();
 
@@ -580,7 +579,13 @@ contract KingBoringVaultReentrancyTest is Test {
         accepted[0] = true;
 
         bytes memory initData = abi.encodeWithSelector(
-            KingBoringVault.initialize.selector, owner, kingVault, address(priceProvider), address(queue), tokens, accepted
+            KingBoringVault.initialize.selector,
+            owner,
+            kingVault,
+            address(priceProvider),
+            address(queue),
+            tokens,
+            accepted
         );
         ERC1967Proxy proxy = new ERC1967Proxy(address(testVault), initData);
         KingBoringVault vaultWithMaliciousTeller = KingBoringVault(address(proxy));
@@ -659,7 +664,9 @@ contract MaliciousAtomicQueue {
      * @notice Malicious updateAtomicRequest that attempts reentrancy
      * @dev This is where the reentrancy attack happens during cancellation/withdrawal
      */
-    function updateAtomicRequest(MockERC20 offer, MockERC20 want, IAtomicQueue.AtomicRequest calldata request) external {
+    function updateAtomicRequest(MockERC20 offer, MockERC20 want, IAtomicQueue.AtomicRequest calldata request)
+        external
+    {
         // Store the request for getUserAtomicRequest queries
         requests[msg.sender][address(offer)][address(want)] = request;
 
@@ -800,10 +807,7 @@ contract MaliciousTeller {
     /**
      * @notice Malicious deposit that attempts reentrancy
      */
-    function deposit(MockERC20 depositAsset, uint256 depositAmount, uint256)
-        external
-        returns (uint256 shares)
-    {
+    function deposit(MockERC20 depositAsset, uint256 depositAmount, uint256) external returns (uint256 shares) {
         // Calculate shares (1:1 for simplicity)
         shares = depositAmount;
 

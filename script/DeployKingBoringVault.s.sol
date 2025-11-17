@@ -174,38 +174,41 @@ contract DeployKingBoringVault is Script {
             try vm.parseTomlString(toml, string.concat(currentKey, ".id")) returns (string memory currentId) {
                 // Check if this is the vault we're looking for
                 if (keccak256(abi.encodePacked(currentId)) == keccak256(abi.encodePacked(vaultId))) {
-                // Found matching vault - parse all fields
-                config.id = currentId;
-                config.network = vm.parseTomlUint(toml, string.concat(currentKey, ".network"));
-                config.vaultType = vm.parseTomlString(toml, string.concat(currentKey, ".type"));
-                config.name = vm.parseTomlString(toml, string.concat(currentKey, ".name"));
-                config.symbol = vm.parseTomlString(toml, string.concat(currentKey, ".symbol"));
-                config.decimals = uint8(vm.parseTomlUint(toml, string.concat(currentKey, ".decimals")));
-                config.owner = vm.parseTomlAddress(toml, string.concat(currentKey, ".owner"));
-                config.kingVault = vm.parseTomlAddress(toml, string.concat(currentKey, ".king_vault"));
-                config.priceProvider = vm.parseTomlAddress(toml, string.concat(currentKey, ".price_provider"));
-                config.atomicQueue = vm.parseTomlAddress(toml, string.concat(currentKey, ".atomic_queue"));
-                config.vaultAddress = vm.parseTomlAddress(toml, string.concat(currentKey, ".vault_address"));
-                config.teller = vm.parseTomlAddress(toml, string.concat(currentKey, ".teller"));
-                config.accountant = vm.parseTomlAddress(toml, string.concat(currentKey, ".accountant"));
-                config.assets = vm.parseTomlAddressArray(toml, string.concat(currentKey, ".assets"));
+                    // Found matching vault - parse all fields
+                    config.id = currentId;
+                    config.network = vm.parseTomlUint(toml, string.concat(currentKey, ".network"));
+                    config.vaultType = vm.parseTomlString(toml, string.concat(currentKey, ".type"));
+                    config.name = vm.parseTomlString(toml, string.concat(currentKey, ".name"));
+                    config.symbol = vm.parseTomlString(toml, string.concat(currentKey, ".symbol"));
+                    config.decimals = uint8(vm.parseTomlUint(toml, string.concat(currentKey, ".decimals")));
+                    config.owner = vm.parseTomlAddress(toml, string.concat(currentKey, ".owner"));
+                    config.kingVault = vm.parseTomlAddress(toml, string.concat(currentKey, ".king_vault"));
+                    config.priceProvider = vm.parseTomlAddress(toml, string.concat(currentKey, ".price_provider"));
+                    config.atomicQueue = vm.parseTomlAddress(toml, string.concat(currentKey, ".atomic_queue"));
+                    config.vaultAddress = vm.parseTomlAddress(toml, string.concat(currentKey, ".vault_address"));
+                    config.teller = vm.parseTomlAddress(toml, string.concat(currentKey, ".teller"));
+                    config.accountant = vm.parseTomlAddress(toml, string.concat(currentKey, ".accountant"));
+                    config.assets = vm.parseTomlAddressArray(toml, string.concat(currentKey, ".assets"));
 
-                // Parse profit distribution (optional)
-                try vm.parseTomlAddressArray(toml, string.concat(currentKey, ".profit_recipients")) returns (address[] memory recipients) {
-                    config.profitRecipients = recipients;
-                    // Parse corresponding percentages
-                    uint256[] memory percents = vm.parseTomlUintArray(toml, string.concat(currentKey, ".profit_percents_bps"));
-                    config.profitPercentsBPS = new uint16[](percents.length);
-                    for (uint256 j = 0; j < percents.length; j++) {
-                        config.profitPercentsBPS[j] = uint16(percents[j]);
+                    // Parse profit distribution (optional)
+                    try vm.parseTomlAddressArray(toml, string.concat(currentKey, ".profit_recipients")) returns (
+                        address[] memory recipients
+                    ) {
+                        config.profitRecipients = recipients;
+                        // Parse corresponding percentages
+                        uint256[] memory percents =
+                            vm.parseTomlUintArray(toml, string.concat(currentKey, ".profit_percents_bps"));
+                        config.profitPercentsBPS = new uint16[](percents.length);
+                        for (uint256 j = 0; j < percents.length; j++) {
+                            config.profitPercentsBPS[j] = uint16(percents[j]);
+                        }
+                    } catch {
+                        // Profit distribution not configured - leave empty
+                        config.profitRecipients = new address[](0);
+                        config.profitPercentsBPS = new uint16[](0);
                     }
-                } catch {
-                    // Profit distribution not configured - leave empty
-                    config.profitRecipients = new address[](0);
-                    config.profitPercentsBPS = new uint16[](0);
-                }
 
-                return config;
+                    return config;
                 }
             } catch {
                 // End of array reached, vault not found
@@ -396,10 +399,7 @@ contract DeployKingBoringVault is Script {
      * @param proxy Address of proxy
      * @param network Network configuration
      */
-    function verifyContracts(address implementation, address proxy, NetworkConfig memory network)
-        internal
-        view
-    {
+    function verifyContracts(address implementation, address proxy, NetworkConfig memory network) internal view {
         // Note: Verification requires --verify flag and proper API keys
         // Foundry handles this automatically when --verify is used
         console.log("  Implementation:", implementation);

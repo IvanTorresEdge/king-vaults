@@ -769,11 +769,11 @@ contract MockAccountant {
         return rate;
     }
 
-    function getRateInQuote(address /* quote */) external view returns (uint256) {
+    function getRateInQuote(address /* quote */ ) external view returns (uint256) {
         return rate; // Simplified: same rate for all assets
     }
 
-    function getRateInQuoteSafe(address /* quote */) external view returns (uint256) {
+    function getRateInQuoteSafe(address /* quote */ ) external view returns (uint256) {
         require(!paused, "Accountant paused");
         return rate;
     }
@@ -789,7 +789,7 @@ contract MockAtomicQueue {
         bool inSolve;
     }
 
-    function updateAtomicRequest(address /* vault */, address asset, AtomicRequest calldata request) external {
+    function updateAtomicRequest(address, /* vault */ address asset, AtomicRequest calldata request) external {
         userAtomicRequest[msg.sender][asset] = request;
     }
 

@@ -172,12 +172,7 @@ contract KingTokenizedVault_ProfitsTest is Test {
 
         // Deploy proxy
         bytes memory initData = abi.encodeWithSelector(
-            KingTokenizedVault.initialize.selector,
-            owner,
-            kingVault,
-            address(priceProvider),
-            assets,
-            accepted
+            KingTokenizedVault.initialize.selector, owner, kingVault, address(priceProvider), assets, accepted
         );
 
         ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initData);

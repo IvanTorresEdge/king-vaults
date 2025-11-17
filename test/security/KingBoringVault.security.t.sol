@@ -1138,7 +1138,9 @@ contract MaliciousAtomicQueue {
      * @notice Malicious updateAtomicRequest that attempts reentrancy
      * @dev This is where the reentrancy attack happens during cancellation/withdrawal
      */
-    function updateAtomicRequest(MockERC20 offer, MockERC20 want, IAtomicQueue.AtomicRequest calldata request) external {
+    function updateAtomicRequest(MockERC20 offer, MockERC20 want, IAtomicQueue.AtomicRequest calldata request)
+        external
+    {
         // Store the request for getUserAtomicRequest queries
         requests[msg.sender][address(offer)][address(want)] = request;
 
@@ -1279,10 +1281,7 @@ contract MaliciousTeller {
     /**
      * @notice Malicious deposit that attempts reentrancy
      */
-    function deposit(MockERC20 depositAsset, uint256 depositAmount, uint256)
-        external
-        returns (uint256 shares)
-    {
+    function deposit(MockERC20 depositAsset, uint256 depositAmount, uint256) external returns (uint256 shares) {
         // Calculate shares (1:1 for simplicity)
         shares = depositAmount;
 
