@@ -263,12 +263,7 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
      * @param priceProvider Price oracle address
      * @param timestamp Block timestamp of initialization
      */
-    event Initialized(
-        address indexed owner,
-        address indexed kingVault,
-        address priceProvider,
-        uint256 timestamp
-    );
+    event Initialized(address indexed owner, address indexed kingVault, address priceProvider, uint256 timestamp);
 
     // ============================================
     // Constructor
@@ -336,12 +331,7 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
      * @param amount Asset amount to deposit
      * @return shares Amount of vault shares received
      */
-    function depositToVault(address asset, uint256 amount)
-        external
-        onlyOwner
-        whenNotPaused
-        returns (uint256 shares)
-    {
+    function depositToVault(address asset, uint256 amount) external onlyOwner whenNotPaused returns (uint256 shares) {
         // Validate amount
         if (amount == 0) revert ZeroAmount();
 
@@ -464,12 +454,7 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
      * @param asset Asset address of pending request
      * @return assetsReceived Amount of assets received
      */
-    function completeWithdrawal(address asset)
-        external
-        onlyOwner
-        whenNotPaused
-        returns (uint256 assetsReceived)
-    {
+    function completeWithdrawal(address asset) external onlyOwner whenNotPaused returns (uint256 assetsReceived) {
         // Validate async mode
         if (isAtomic) revert InvalidWithdrawalMode();
 
@@ -541,29 +526,29 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
     }
 
     /**
-     * @notice Calculate available balance for Flow A withdrawal per asset
-     * @dev Available = idle balance - queued principal - queued profits
+     * @notice Calculate available balance for withdrawals to main vault (override)
+     * @dev Returns idle balance minus queued operations (principal + profit withdrawals)
      * @dev Protects assets reserved for Type A (principal) and Type B (profit) operations
      * @param asset Asset address to check
      * @return Available amount that can be safely withdrawn to main vault
+     *
+     * @custom:formula available = idle - queuedPrincipal - queuedProfit
+     * @custom:override Adds withdrawal queue tracking to base implementation
      */
-    function availableForWithdraw(address asset) public view returns (uint256) {
+    function availableForWithdraw(address _asset) public view override returns (uint256) {
         // Get idle balance (not deployed to vault)
-        uint256 idle = IERC20(asset).balanceOf(address(this));
+        uint256 idle = IERC20(_asset).balanceOf(address(this));
 
-        // Subtract queued principal withdrawals (Type A)
-        uint256 queuedPrincipal = _queuedWithdraw[asset];
-
-        // Subtract queued profit withdrawals (Type B)
-        uint256 queuedProfit = _queuedProfits[asset];
+        // Get queued amounts (dual tracking)
+        uint256 queuedPrincipal = _queuedWithdraw[_asset];
+        uint256 queuedProfit = _queuedProfits[_asset];
 
         // Calculate available (return 0 if queued amounts exceed idle)
-        uint256 totalQueued = queuedPrincipal + queuedProfit;
-        if (idle <= totalQueued) {
-            return 0;
-        }
+        uint256 reserved = queuedPrincipal + queuedProfit;
 
-        return idle - totalQueued;
+        if (idle <= reserved) return 0;
+
+        return idle - reserved;
     }
 
     /**
@@ -574,11 +559,7 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
      * @param _amounts Array of amounts to withdraw
      * @param _receiver Address to receive withdrawn assets
      */
-    function withdraw(
-        address[] memory _tokens,
-        uint256[] memory _amounts,
-        address _receiver
-    ) public override {
+    function withdraw(address[] memory _tokens, uint256[] memory _amounts, address _receiver) public override {
         // Access control: only kingVault can call
         _requireKingVault();
 
@@ -641,6 +622,21 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
     function getVaultShares() external view returns (uint256 shares) {
         return IERC20(vault).balanceOf(address(this));
     }
+
+    // NOTE: tvl() function is inherited from parent KingVault
+    // It correctly uses _deposits mapping for principal-only TVL tracking
+    // Share appreciation does NOT affect TVL - it's tracked as profit separately
+    //
+    // CRITICAL ACCOUNTING:
+    // - _deposits[asset] only changes when King main vault calls deposit()/withdraw()
+    // - Deployment to ERC-4626 vault does NOT affect TVL (principal unchanged)
+    // - Share value appreciation does NOT affect TVL
+    // - Profit = shareValue - principal (separate from TVL, tracked by calculateProfit)
+    //
+    // Example: 10 WETH deposited → deployed to ERC-4626 vault
+    //   Later: ERC-4626 shares appreciate 1.5x
+    //   TVL remains 10 WETH (principal only)
+    //   Profit = (10 WETH × 1.5) - 10 WETH = 5 WETH (NOT in TVL)
 
     // ============================================
     // Flow B: Profit Management
@@ -793,7 +789,9 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
 
             // Emit events
             emit ProfitSharesQueued(profitShares, profitInEth);
-            emit WithdrawalQueued(underlyingAsset, profitShares, expectedAssets, _withdrawalRequests[underlyingAsset].deadline);
+            emit WithdrawalQueued(
+                underlyingAsset, profitShares, expectedAssets, _withdrawalRequests[underlyingAsset].deadline
+            );
         }
 
         // Emit harvest event

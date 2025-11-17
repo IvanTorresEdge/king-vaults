@@ -41,7 +41,6 @@ import {IPriceProvider} from "../interfaces/IPriceProvider.sol";
  * 3. harvestProfits(): Calculate share appreciation → distribute to recipients
  */
 contract KingBoringVault is KingBoringVaultStorage, KingVault {
-
     // ============================================
     // Constants
     // ============================================
@@ -267,11 +266,7 @@ contract KingBoringVault is KingBoringVaultStorage, KingVault {
      * @param timestamp Block timestamp of initialization
      */
     event Initialized(
-        address indexed owner,
-        address indexed kingVault,
-        address priceProvider,
-        address atomicQueue,
-        uint256 timestamp
+        address indexed owner, address indexed kingVault, address priceProvider, address atomicQueue, uint256 timestamp
     );
 
     // ============================================
@@ -607,30 +602,30 @@ contract KingBoringVault is KingBoringVaultStorage, KingVault {
     }
 
     /**
-     * @notice Calculate available balance for principal withdrawals (protection function)
-     * @dev Prevents profit assets from being withdrawn as principal
-     * @dev DUAL TRACKING: Uses both _queuedProfits and _queuedWithdraw
+     * @notice Calculate available balance for withdrawals to main vault (override)
+     * @dev Returns idle balance minus queued operations (principal + profit withdrawals)
+     * @dev Protects assets reserved for Type A (principal) and Type B (profit) operations
+     * @param _asset Asset address to check
+     * @return Available amount that can be safely withdrawn to main vault
      *
-     * @param _asset ERC-20 token address to check
-     * @return available Amount available for principal withdrawal (after reserving profits)
+     * @custom:formula available = idle - queuedPrincipal - queuedProfit
+     * @custom:override Adds withdrawal queue tracking to base implementation
      */
-    function availableForWithdraw(address _asset) public view returns (uint256) {
+    function availableForWithdraw(address _asset) public view override returns (uint256) {
         // Get current idle balance
-        uint256 balance = IERC20(_asset).balanceOf(address(this));
-
-        // Get principal deposits (from parent)
-        uint256 principal = _deposits[_asset];
+        uint256 idle = IERC20(_asset).balanceOf(address(this));
 
         // Get queued amounts (dual tracking)
-        uint256 queuedProfits = _queuedProfits[_asset];
-        uint256 queuedWithdraw = _queuedWithdraw[_asset];
+        uint256 queuedPrincipal = _queuedWithdraw[_asset];
+        uint256 queuedProfit = _queuedProfits[_asset];
 
-        // Calculate total reserved amount
-        uint256 reserved = principal + queuedProfits + queuedWithdraw;
+        // Calculate available (return 0 if queued amounts exceed idle)
+        uint256 reserved = queuedPrincipal + queuedProfit;
 
         // Return available (with underflow protection)
-        if (balance <= reserved) return 0;
-        return balance - reserved;
+        if (idle <= reserved) return 0;
+
+        return idle - reserved;
     }
 
     /**

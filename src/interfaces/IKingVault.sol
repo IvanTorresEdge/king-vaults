@@ -298,6 +298,24 @@ interface IKingVault {
      */
     function getBalance(address _asset) external view returns (uint256 _amount);
 
+    /**
+     * @notice Calculate available balance for withdrawals to main vault
+     * @dev Returns idle balance minus queued operations (principal + profit withdrawals)
+     * @dev Protects assets reserved for pending async withdrawal operations
+     * @dev Used by withdraw() to prevent withdrawal of reserved assets
+     * @param asset Asset address to check
+     * @return Available amount that can be safely withdrawn to main vault
+     *
+     * @custom:formula available = idle - queuedPrincipal - queuedProfit
+     * @custom:example
+     * ```solidity
+     * // Scenario: 100 WETH idle, 20 queued for principal withdrawal, 10 queued for profit
+     * uint256 available = vault.availableForWithdraw(WETH);
+     * // Returns: 70 WETH (100 - 20 - 10)
+     * ```
+     */
+    function availableForWithdraw(address asset) external view returns (uint256);
+
     // NOTE: The following view functions are not declared here because they are already
     // provided by parent contracts or public state variables:
     // - kingVault() - public state variable in KingVaultStorage

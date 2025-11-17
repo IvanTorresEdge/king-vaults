@@ -668,4 +668,33 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
         // Return principal deposit for this asset (0 if not registered)
         return _deposits[_asset];
     }
+
+    /**
+     * @notice Calculate available balance for withdrawals to main vault
+     * @dev Returns idle balance minus queued operations (principal + profit withdrawals)
+     * @dev Protects assets reserved for pending async withdrawal operations
+     * @dev Virtual function - child vaults override to add withdrawal queue tracking
+     * @param asset Asset address to check
+     * @return Available amount that can be safely withdrawn to main vault
+     *
+     * @custom:formula available = idle - queuedPrincipal - queuedProfit
+     * @custom:note Base implementation returns idle balance (no queuing support)
+     * @custom:note KingBoringVault and KingTokenizedVault override to subtract queued amounts
+     * @custom:example
+     * ```solidity
+     * // Base KingVault: Returns full idle balance
+     * uint256 available = vault.availableForWithdraw(WETH);
+     * // Returns: IERC20(WETH).balanceOf(address(this))
+     *
+     * // KingTokenizedVault with queues: Returns idle minus reserved
+     * // Scenario: 100 WETH idle, 20 queued for principal, 10 queued for profit
+     * uint256 available = tokenizedVault.availableForWithdraw(WETH);
+     * // Returns: 70 WETH (100 - 20 - 10)
+     * ```
+     */
+    function availableForWithdraw(address asset) public view virtual returns (uint256) {
+        // Base implementation: return full idle balance
+        // Child vaults override to subtract queued withdrawals
+        return IERC20(asset).balanceOf(address(this));
+    }
 }
