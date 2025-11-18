@@ -5,6 +5,7 @@ import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Ini
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {Ownable2StepUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
+import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {IKingVault} from "../interfaces/IKingVault.sol";
 
@@ -16,7 +17,7 @@ import {IKingVault} from "../interfaces/IKingVault.sol";
  * @dev Provides base storage structure for all vault types with UUPS upgradeability
  * @dev Uses simplified storage with separate mappings for gas efficiency (Decision 12 & 13)
  */
-abstract contract KingVaultStorage is Initializable, Ownable2StepUpgradeable, PausableUpgradeable, UUPSUpgradeable {
+abstract contract KingVaultStorage is Initializable, Ownable2StepUpgradeable, PausableUpgradeable, UUPSUpgradeable, ReentrancyGuardUpgradeable {
     // ============================================
     // State Variables
     // ============================================
@@ -78,10 +79,11 @@ abstract contract KingVaultStorage is Initializable, Ownable2StepUpgradeable, Pa
 
     /**
      * @dev Storage gap to allow for future upgrades
-     * @dev Reserves 50 slots for adding new state variables in future versions
+     * @dev Reserves 49 slots for adding new state variables in future versions
      * @dev Critical for UUPS upgradeability pattern
+     * @dev Reduced from 50 to 49 due to ReentrancyGuardUpgradeable adding 1 slot
      */
-    uint256[50] private __gap;
+    uint256[49] private __gap;
 
     // ============================================
     // Internal Helper Functions

@@ -68,13 +68,13 @@ abstract contract KingTokenizedVaultStorage is KingVaultStorage {
     // ============================================
 
     /**
-     * @notice Pending shares committed to withdrawal
-     * @dev Only one withdrawal request at a time
+     * @notice Pending shares committed to withdrawal per asset
+     * @dev Maps asset address to pending share amount
      * @dev Set when withdrawFromVault() called
      * @dev Cleared when completeWithdrawal() or cancelWithdrawal() called
-     * @dev Prevents concurrent withdrawal requests
+     * @dev Per-asset tracking prevents accounting collision (SECURITY FIX)
      */
-    uint256 internal _pendingShares;
+    mapping(address => uint256) internal _pendingSharesByAsset;
 
     /**
      * @notice Tracks withdrawal request details per asset

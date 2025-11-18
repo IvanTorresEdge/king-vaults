@@ -49,6 +49,7 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
         __Ownable2Step_init();
         __Pausable_init();
         __UUPSUpgradeable_init();
+        __ReentrancyGuard_init();
 
         // Transfer ownership to specified owner
         _transferOwnership(_owner);
@@ -74,7 +75,7 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
      * @param _assets Array of asset addresses to deposit
      * @param _amounts Array of amounts to deposit (must match assets length)
      */
-    function deposit(address[] memory _assets, uint256[] memory _amounts) external override {
+    function deposit(address[] memory _assets, uint256[] memory _amounts) external override nonReentrant {
         // Access control: only kingVault can call
         _requireKingVault();
 
@@ -124,6 +125,7 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
         external
         virtual
         override
+        nonReentrant
     {
         // Access control: only kingVault can call
         _requireKingVault();
@@ -170,7 +172,7 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
      * @dev Works even when paused (no pause check)
      * @dev Transfers all idle balances back to kingVault and resets deposits
      */
-    function emergencyWithdraw() external override {
+    function emergencyWithdraw() external override nonReentrant {
         // Access control: owner or kingVault can call
         _requireOwnerOrKingVault();
 
@@ -357,7 +359,7 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
      * @dev Same percentages apply to all tokens (not per-token distribution)
      * @dev Iterates through _assets array for tokens, _profitsRecipients array for recipients
      */
-    function distributeProfits() external virtual override {
+    function distributeProfits() external virtual override nonReentrant {
         // Access control: only owner can distribute
         _requireOwner();
 

@@ -453,7 +453,8 @@ contract KingBoringVault is KingBoringVaultStorage, KingVault {
 
         // Check sufficient available shares
         uint256 currentShares = IERC20(vault).balanceOf(address(this));
-        uint256 availableShares = currentShares - _pendingShares;
+        uint256 totalPending = _getTotalPendingShares();
+        uint256 availableShares = currentShares - totalPending;
 
         if (_shareAmount > availableShares) {
             revert InsufficientAvailableBalance(vault, _shareAmount, availableShares);
@@ -485,7 +486,7 @@ contract KingBoringVault is KingBoringVaultStorage, KingVault {
             want: _shareAmount,
             deadline: deadline
         });
-        _pendingShares += _shareAmount;
+        _pendingSharesByAsset[_asset] += _shareAmount;
         _queuedWithdraw[_asset] += expectedAmount;
 
         // SECURITY FIX (Slither): Use SafeERC20.forceApprove() instead of approve()
@@ -547,11 +548,10 @@ contract KingBoringVault is KingBoringVaultStorage, KingVault {
         // DUAL TRACKING: Decrement queued withdraw (clear Type A tracking)
         _queuedWithdraw[_asset] -= _amount;
 
-        // Delete withdrawal request
+        // Delete withdrawal request and clear pending shares for this asset
+        WithdrawalRequest memory req = _withdrawalRequests[_asset];
         delete _withdrawalRequests[_asset];
-
-        // Reset pending shares
-        _pendingShares = 0;
+        _pendingSharesByAsset[_asset] = 0;
 
         emit PrincipalWithdrawCompleted(_asset, _amount, _receiver, block.timestamp);
     }
@@ -588,8 +588,8 @@ contract KingBoringVault is KingBoringVaultStorage, KingVault {
         // Update state BEFORE external call to prevent reentrancy
         _deposits[_asset] += queuedAmount;
         _queuedWithdraw[_asset] -= queuedAmount;
+        _pendingSharesByAsset[_asset] = 0;
         delete _withdrawalRequests[_asset];
-        _pendingShares = 0;
 
         // Cancel withdrawal in AtomicQueue (EXTERNAL CALL)
         IAtomicQueue(atomicQueue).updateAtomicRequest(
@@ -703,6 +703,18 @@ contract KingBoringVault is KingBoringVaultStorage, KingVault {
     // ============================================
     // Internal Helpers
     // ============================================
+
+    /**
+     * @notice Calculate total pending shares across all assets
+     * @dev Sums _pendingSharesByAsset for all registered assets
+     * @return totalPending Total shares committed to pending withdrawals
+     */
+    function _getTotalPendingShares() internal view returns (uint256 totalPending) {
+        for (uint256 i = 0; i < _assets.length; i++) {
+            totalPending += _pendingSharesByAsset[_assets[i]];
+        }
+        return totalPending;
+    }
 
     /**
      * @notice Calculate expected shares for deposit amount
@@ -1015,8 +1027,8 @@ contract KingBoringVault is KingBoringVaultStorage, KingVault {
             deadline: deadline
         });
 
-        // Update pending shares
-        _pendingShares += _shareAmount;
+        // Update pending shares for this asset
+        _pendingSharesByAsset[_asset] += _shareAmount;
 
         // NOTE: Does NOT modify _queuedWithdraw (only Type A uses this)
         // NOTE: Does NOT modify _deposits (profit ≠ principal)
@@ -1204,8 +1216,8 @@ contract KingBoringVault is KingBoringVaultStorage, KingVault {
         // 4. SECURITY FIX (Slither): Apply CEI pattern - Effects before Interactions
         // Update state BEFORE external call to prevent reentrancy
         _queuedProfits[_asset] -= queuedAmount;
+        _pendingSharesByAsset[_asset] = 0;
         delete _withdrawalRequests[_asset];
-        _pendingShares = 0;
 
         // 5. Cancel withdrawal in AtomicQueue (EXTERNAL CALL)
         IAtomicQueue(atomicQueue).updateAtomicRequest(
@@ -1286,7 +1298,8 @@ contract KingBoringVault is KingBoringVaultStorage, KingVault {
         }
 
         // Require no pending withdrawals
-        if (_pendingShares > 0) {
+        uint256 totalPending = _getTotalPendingShares();
+        if (totalPending > 0) {
             revert NoWithdrawalQueued(); // Indicates pending withdrawal blocks update
         }
 
@@ -1337,18 +1350,18 @@ contract KingBoringVault is KingBoringVaultStorage, KingVault {
     // ============================================
 
     /**
-     * @notice Get pending shares committed to withdrawal
-     * @dev Returns amount of shares locked in active withdrawal request
-     * @return Pending share amount (0 if no active withdrawal)
+     * @notice Get pending shares committed to withdrawal across all assets
+     * @dev Returns total amount of shares locked in all active withdrawal requests
+     * @return Total pending share amount (0 if no active withdrawals)
      *
      * Example Usage:
      * ```solidity
      * uint256 pending = kingBoringVault.getPendingShares();
-     * // Returns: 83e18 (83 shares queued for withdrawal)
+     * // Returns: 83e18 (83 total shares queued across all assets)
      * ```
      */
     function getPendingShares() external view returns (uint256) {
-        return _pendingShares;
+        return _getTotalPendingShares();
     }
 
     /**

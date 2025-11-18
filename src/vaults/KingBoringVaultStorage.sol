@@ -78,13 +78,13 @@ abstract contract KingBoringVaultStorage is KingVaultStorage {
     // ============================================
 
     /**
-     * @notice Pending shares committed to withdrawal
-     * @dev Only one withdrawal request at a time (single _pendingShares tracks all pending)
+     * @notice Pending shares committed to withdrawal per asset
+     * @dev Maps asset address to pending share amount
      * @dev Set when withdrawFromVault() or harvestProfits() called
      * @dev Cleared when completePrincipalWithdraw() or distributeProfits() called
-     * @dev Prevents concurrent withdrawal requests
+     * @dev Per-asset tracking prevents accounting collision (SECURITY FIX)
      */
-    uint256 internal _pendingShares;
+    mapping(address => uint256) internal _pendingSharesByAsset;
 
     /**
      * @notice Tracks withdrawal request details per asset
