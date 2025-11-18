@@ -601,6 +601,15 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
 
             // Update principal tracking
             _deposits[token] -= amount;
+
+            // SECURITY FIX (CF-02): Decrement _queuedWithdraw when returning recalled principal
+            // This prevents deadlock where _queuedWithdraw stays sticky after completeWithdrawal()
+            uint256 queuedAmount = _queuedWithdraw[token];
+            if (queuedAmount > 0) {
+                // Decrement up to the amount being withdrawn
+                uint256 toDeduct = amount < queuedAmount ? amount : queuedAmount;
+                _queuedWithdraw[token] -= toDeduct;
+            }
         }
 
         // Emit event
@@ -804,43 +813,47 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
 
     /**
      * @notice Override distributeProfits to process queued profit withdrawals
-     * @dev Processes _queuedProfits and transfers to recipients
-     * @dev Type B withdrawal completion - distributes harvested profits
+     * @dev Processes _queuedProfits and delegates to base class for proper recipient distribution
+     * @dev Type B withdrawal completion - distributes harvested profits to configured recipients
+     * @dev SECURITY FIX (HF-01): Delegates to base class to respect _profitsRecipients configuration
      */
     function distributeProfits() external override onlyOwner whenNotPaused {
-        // Get all assets with queued profits
-        address[] memory assetsWithProfits = new address[](_assets.length);
-        uint256 count = 0;
+        // Check if there are queued profits
+        bool hasProfits = false;
+        for (uint256 i = 0; i < _assets.length; i++) {
+            if (_queuedProfits[_assets[i]] > 0) {
+                hasProfits = true;
+                break;
+            }
+        }
 
+        if (!hasProfits) revert NoProfitsToDistribute();
+
+        // SECURITY FIX (HF-01): Move queued profits to _deposits so base class can distribute them
+        // This makes profits visible to base distributeProfits() logic as "balance > principal"
         for (uint256 i = 0; i < _assets.length; i++) {
             address asset = _assets[i];
-            if (_queuedProfits[asset] > 0) {
-                assetsWithProfits[count] = asset;
-                count++;
-            }
-        }
-
-        if (count == 0) revert NoProfitsToDistribute();
-
-        // Process each asset with queued profits
-        for (uint256 i = 0; i < count; i++) {
-            address asset = assetsWithProfits[i];
             uint256 profitAmount = _queuedProfits[asset];
 
-            // Verify we have the assets
-            uint256 balance = IERC20(asset).balanceOf(address(this));
-            if (balance < profitAmount) {
-                revert InsufficientBalance(asset, profitAmount, balance);
+            if (profitAmount > 0) {
+                // Verify we have the assets
+                uint256 balance = IERC20(asset).balanceOf(address(this));
+                if (balance < profitAmount) {
+                    revert InsufficientBalance(asset, profitAmount, balance);
+                }
+
+                // Add profits to deposits so base class sees: balance > _deposits = profit
+                _deposits[asset] += profitAmount;
+
+                // Clear queued profits
+                _queuedProfits[asset] = 0;
             }
-
-            // Clear queued profits first (reentrancy protection)
-            _queuedProfits[asset] = 0;
-
-            // Transfer profits to main vault
-            IERC20(asset).safeTransfer(kingVault, profitAmount);
-
-            emit ProfitsDistributed(asset, profitAmount);
         }
+
+        // Delegate to base class which properly distributes to _profitsRecipients
+        // Base class calculates: profit = balance - _deposits for each asset
+        // Now that we've added _queuedProfits to _deposits, base class will see them as profit
+        super.distributeProfits();
     }
 
     // ============================================

@@ -428,20 +428,15 @@ contract KingBoringVault is KingBoringVaultStorage, KingVault {
     }
 
     /**
-     * @notice Queue withdrawal of assets from BoringVault (principal return, Type A)
-     * @dev Owner-only function to queue principal withdrawal via AtomicQueue
-     * @dev Asynchronous operation: Request queued → solver fulfills → call completePrincipalWithdraw()
-     * @dev DUAL TRACKING: Increments _queuedWithdraw[_asset] to protect from profit contamination
+     * @notice Internal helper to queue withdrawal from BoringVault
+     * @dev Contains core withdrawal logic, callable from external and internal contexts
+     * @dev SECURITY FIX (CF-01): Prevents msg.sender context change during self-calls
      *
      * @param _asset ERC-20 token address we want to receive
      * @param _shareAmount BoringVault shares to withdraw
      * @param _deadline Unix timestamp for request expiration (0 = use default withdrawalDuration)
      */
-    function withdrawFromVault(address _asset, uint256 _shareAmount, uint64 _deadline)
-        external
-        onlyOwner
-        whenNotPaused
-    {
+    function _withdrawFromVaultInternal(address _asset, uint256 _shareAmount, uint64 _deadline) internal {
         if (_asset == address(0)) revert ZeroAddress();
         if (_shareAmount == 0) revert ZeroAmount();
         if (!_registeredTokens[_asset]) revert AssetNotAccepted(_asset);
@@ -501,6 +496,25 @@ contract KingBoringVault is KingBoringVaultStorage, KingVault {
         );
 
         emit WithdrawalQueued(_asset, _shareAmount, expectedAmount, deadline);
+    }
+
+    /**
+     * @notice Queue withdrawal of assets from BoringVault (principal return, Type A)
+     * @dev Owner-only function to queue principal withdrawal via AtomicQueue
+     * @dev Asynchronous operation: Request queued → solver fulfills → call completePrincipalWithdraw()
+     * @dev DUAL TRACKING: Increments _queuedWithdraw[_asset] to protect from profit contamination
+     * @dev SECURITY FIX (CF-01): Delegates to internal helper to avoid access control issues
+     *
+     * @param _asset ERC-20 token address we want to receive
+     * @param _shareAmount BoringVault shares to withdraw
+     * @param _deadline Unix timestamp for request expiration (0 = use default withdrawalDuration)
+     */
+    function withdrawFromVault(address _asset, uint256 _shareAmount, uint64 _deadline)
+        external
+        onlyOwner
+        whenNotPaused
+    {
+        _withdrawFromVaultInternal(_asset, _shareAmount, _deadline);
     }
 
     /**
@@ -692,8 +706,9 @@ contract KingBoringVault is KingBoringVaultStorage, KingVault {
                 // Reduce deposits optimistically BEFORE external call (will be restored if cancelled)
                 _deposits[asset] -= needed;
 
-                // Queue withdrawal from BoringVault (Type A) - EXTERNAL CALL
-                this.withdrawFromVault(asset, sharesNeeded, 0); // 0 = use default deadline
+                // SECURITY FIX (CF-01): Call internal helper to avoid access control issues
+                // Queue withdrawal from BoringVault (Type A) - INTERNAL CALL
+                _withdrawFromVaultInternal(asset, sharesNeeded, 0); // 0 = use default deadline
             }
         }
 
