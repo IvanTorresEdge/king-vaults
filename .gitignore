@@ -81,3 +81,7 @@ site/
 deployments/localhost/
 deployments/hardhat/
 storage-layout-*.txt
+
+# AI assistant context files (not for repository)
+CLAUDE.md
+solidity_auditor.md
