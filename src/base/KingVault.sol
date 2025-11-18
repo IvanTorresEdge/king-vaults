@@ -7,6 +7,7 @@ import {IPriceProvider} from "../interfaces/IPriceProvider.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import {IERC165} from "@openzeppelin/contracts/interfaces/IERC165.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /**
@@ -696,5 +697,19 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
         // Base implementation: return full idle balance
         // Child vaults override to subtract queued withdrawals
         return IERC20(asset).balanceOf(address(this));
+    }
+
+    // ============================================
+    // ERC165 Support
+    // ============================================
+
+    /**
+     * @notice Check if contract supports a given interface
+     * @dev Implements ERC165 interface detection
+     * @param interfaceId The interface identifier to check
+     * @return true if the contract supports the interface, false otherwise
+     */
+    function supportsInterface(bytes4 interfaceId) external pure virtual override returns (bool) {
+        return interfaceId == type(IKingVault).interfaceId || interfaceId == type(IERC165).interfaceId;
     }
 }

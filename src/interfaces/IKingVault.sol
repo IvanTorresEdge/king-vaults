@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.25;
 
+import {IERC165} from "@openzeppelin/contracts/interfaces/IERC165.sol";
+
 /**
  * @title IKingVault
  * @author King Protocol (https://www.kingprotocol.org)
@@ -8,7 +10,7 @@ pragma solidity ^0.8.25;
  * @notice Interface for King Protocol vault implementations
  * @dev Provides standardized interface for all vault types (KingBoringVault, KingTokenizedVault, etc.)
  */
-interface IKingVault {
+interface IKingVault is IERC165 {
     // ============================================
     // Events
     // ============================================
