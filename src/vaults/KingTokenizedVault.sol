@@ -385,9 +385,10 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
         // Validate asset is registered
         if (!_registeredTokens[asset]) revert AssetNotAccepted(asset);
 
-        // Calculate available shares (total - pending)
+        // Calculate available shares (total - pending across all assets)
         uint256 totalShares = IERC20(vault).balanceOf(address(this));
-        uint256 availableShares = totalShares - _pendingShares;
+        uint256 totalPending = _calculateTotalPendingShares();
+        uint256 availableShares = totalShares - totalPending;
 
         // Check sufficient shares available
         if (availableShares < shareAmount) {
@@ -438,8 +439,8 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
                 isProfitWithdrawal: false
             });
 
-            // Lock shares
-            _pendingShares += shareAmount;
+            // Lock shares for this asset
+            _pendingSharesByAsset[asset] += shareAmount;
 
             // Emit queue event
             emit WithdrawalQueued(asset, shareAmount, expectedAssets, _withdrawalRequests[asset].deadline);
@@ -482,8 +483,8 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
             revert SlippageExceeded(request.expected, assetsReceived);
         }
 
-        // Release locked shares
-        _pendingShares -= request.shares;
+        // Release locked shares for this asset only
+        _pendingSharesByAsset[asset] -= request.shares;
 
         // Track in appropriate queue based on withdrawal type (Type A vs Type B)
         if (request.isProfitWithdrawal) {
@@ -517,8 +518,8 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
         // Validate request exists
         if (request.asset == address(0)) revert NoWithdrawalRequest(asset);
 
-        // Release locked shares
-        _pendingShares -= request.shares;
+        // Release locked shares for this asset only
+        _pendingSharesByAsset[asset] -= request.shares;
 
         // Clear withdrawal request
         delete _withdrawalRequests[asset];
@@ -623,6 +624,32 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
      */
     function getVaultShares() external view returns (uint256 shares) {
         return IERC20(vault).balanceOf(address(this));
+    }
+
+    /**
+     * @notice Calculate total pending shares across all assets
+     * @dev Sums _pendingSharesByAsset for all registered assets
+     * @dev Used to determine available shares for new withdrawals
+     * @dev Per-asset tracking enables concurrent withdrawals without accounting collisions
+     *
+     * @return total Sum of pending shares across all assets
+     *
+     * @custom:formula total = Σ(_pendingSharesByAsset[asset]) for all registered assets
+     * @custom:example
+     * Scenario: WETH withdrawal (100 shares) + USDC withdrawal (50 shares)
+     *   _pendingSharesByAsset[WETH] = 100
+     *   _pendingSharesByAsset[USDC] = 50
+     *   _calculateTotalPendingShares() = 150
+     *
+     * Algorithm:
+     * 1. Iterate through all registered assets (_assets array)
+     * 2. Sum _pendingSharesByAsset[asset] for each
+     * 3. Return total
+     */
+    function _calculateTotalPendingShares() internal view returns (uint256 total) {
+        for (uint256 i = 0; i < _assets.length; i++) {
+            total += _pendingSharesByAsset[_assets[i]];
+        }
     }
 
     // NOTE: tvl() function is inherited from parent KingVault
@@ -743,8 +770,9 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
         if (profitShares == 0) revert NoProfitShares();
         if (profitShares > totalShares) revert InvalidProfitCalculation();
 
-        // Validate sufficient shares available (not already pending)
-        uint256 availableShares = totalShares - _pendingShares;
+        // Validate sufficient shares available (not already pending across all assets)
+        uint256 totalPending = _calculateTotalPendingShares();
+        uint256 availableShares = totalShares - totalPending;
         if (availableShares < profitShares) {
             revert InsufficientBalance(vault, profitShares, availableShares);
         }
@@ -786,8 +814,8 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
                 isProfitWithdrawal: true
             });
 
-            // Lock shares
-            _pendingShares += profitShares;
+            // Lock shares for this asset
+            _pendingSharesByAsset[underlyingAsset] += profitShares;
 
             // Emit events
             emit ProfitSharesQueued(profitShares, profitInEth);
