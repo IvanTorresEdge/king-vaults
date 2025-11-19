@@ -517,6 +517,7 @@ contract KingBoringVault is KingBoringVaultStorage, KingVault {
         external
         onlyOwner
         whenNotPaused
+        nonReentrant
     {
         if (_asset == address(0)) revert ZeroAddress();
         if (_amount == 0) revert ZeroAmount();
@@ -641,7 +642,11 @@ contract KingBoringVault is KingBoringVaultStorage, KingVault {
      * @param _amounts Token amounts to withdraw (parallel arrays)
      * @param _receiver Address to receive withdrawn assets (King main vault)
      */
-    function withdraw(address[] memory _assets, uint256[] memory _amounts, address _receiver) external override {
+    function withdraw(address[] memory _assets, uint256[] memory _amounts, address _receiver)
+        external
+        override
+        nonReentrant
+    {
         // Access control: only kingVault can call
         _requireKingVault();
 
@@ -651,7 +656,12 @@ contract KingBoringVault is KingBoringVaultStorage, KingVault {
         if (_assets.length != _amounts.length) revert InvalidAssetArray();
         if (_receiver == address(0)) revert ZeroAddress();
 
-        // Process each asset
+        // Temporary storage for withdrawal details
+        uint256[] memory idleAmounts = new uint256[](_assets.length);
+        uint256[] memory neededAmounts = new uint256[](_assets.length);
+        uint256[] memory sharesNeeded = new uint256[](_assets.length);
+        bool[] memory needsVaultWithdrawal = new bool[](_assets.length);
+
         for (uint256 i = 0; i < _assets.length; i++) {
             address asset = _assets[i];
             uint256 amount = _amounts[i];
@@ -662,16 +672,16 @@ contract KingBoringVault is KingBoringVaultStorage, KingVault {
 
             // Get idle balance
             uint256 idle = IERC20(asset).balanceOf(address(this));
+            idleAmounts[i] = idle;
 
             if (idle >= amount) {
-                // SECURITY FIX (Slither): Apply CEI pattern - Effects before Interactions
-                // Update state BEFORE external call to prevent reentrancy
-                _deposits[asset] -= amount;
-                // Sufficient idle balance, transfer directly (EXTERNAL CALL)
-                SafeERC20.safeTransfer(IERC20(asset), _receiver, amount);
+                // Sufficient idle balance, no vault withdrawal needed
+                needsVaultWithdrawal[i] = false;
             } else {
                 // Need to withdraw from BoringVault
                 uint256 needed = amount - idle;
+                neededAmounts[i] = needed;
+                needsVaultWithdrawal[i] = true;
 
                 // PROTECTION: Check availability (prevents profit contamination)
                 uint256 available = availableForWithdraw(asset);
@@ -679,25 +689,36 @@ contract KingBoringVault is KingBoringVaultStorage, KingVault {
                     revert InsufficientAvailableBalance(asset, needed, available);
                 }
 
-                // SECURITY FIX (Slither): Apply CEI pattern - Effects before Interactions
-                // Update state BEFORE external calls to prevent reentrancy
-
-                // Transfer any idle first
-                if (idle > 0) {
-                    _deposits[asset] -= idle;
-                    SafeERC20.safeTransfer(IERC20(asset), _receiver, idle); // EXTERNAL CALL
-                }
-
                 // Calculate shares needed for remaining amount
                 uint256 rate = IAccountantWithRateProviders(accountant).getRateInQuoteSafe(ERC20(asset));
                 uint8 decimals = IAccountantWithRateProviders(accountant).decimals();
-                uint256 sharesNeeded = Math.mulDiv(needed, 10 ** decimals, rate);
+                sharesNeeded[i] = Math.mulDiv(needed, 10 ** decimals, rate);
+            }
+        }
 
-                // Reduce deposits optimistically BEFORE external call (will be restored if cancelled)
-                _deposits[asset] -= needed;
+        for (uint256 i = 0; i < _assets.length; i++) {
+            address asset = _assets[i];
+            uint256 amount = _amounts[i];
 
-                // Queue withdrawal from BoringVault (Type A) - EXTERNAL CALL
-                this.withdrawFromVault(asset, sharesNeeded, 0); // 0 = use default deadline
+            // Update deposits for all assets
+            _deposits[asset] -= amount;
+        }
+
+        for (uint256 i = 0; i < _assets.length; i++) {
+            address asset = _assets[i];
+            uint256 idle = idleAmounts[i];
+
+            if (!needsVaultWithdrawal[i]) {
+                // Transfer full amount directly from idle
+                SafeERC20.safeTransfer(IERC20(asset), _receiver, _amounts[i]);
+            } else {
+                // Transfer idle first (if any)
+                if (idle > 0) {
+                    SafeERC20.safeTransfer(IERC20(asset), _receiver, idle);
+                }
+
+                // Queue withdrawal from BoringVault for the remaining amount
+                this.withdrawFromVault(asset, sharesNeeded[i], 0);
             }
         }
 
@@ -948,7 +969,7 @@ contract KingBoringVault is KingBoringVaultStorage, KingVault {
      * // _deposits[WETH] UNCHANGED (profit ≠ principal)
      * ```
      */
-    function harvestProfits() external override onlyOwner whenNotPaused {
+    function harvestProfits() external override onlyOwner whenNotPaused nonReentrant {
         // 1. Calculate current profit
         uint256 profitInEth = calculateProfit();
         if (profitInEth == 0) revert NoProfitToHarvest();
@@ -1083,7 +1104,7 @@ contract KingBoringVault is KingBoringVaultStorage, KingVault {
      * // - Ready for next harvest cycle
      * ```
      */
-    function distributeProfits() external override onlyOwner whenNotPaused {
+    function distributeProfits() external override onlyOwner whenNotPaused nonReentrant {
         // Access control already verified by modifiers above
 
         // Validate we have at least one recipient configured

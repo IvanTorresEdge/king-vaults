@@ -49,6 +49,7 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
         __Ownable2Step_init();
         __Pausable_init();
         __UUPSUpgradeable_init();
+        __ReentrancyGuard_init();
 
         // Transfer ownership to specified owner
         _transferOwnership(_owner);
@@ -74,7 +75,7 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
      * @param _assets Array of asset addresses to deposit
      * @param _amounts Array of amounts to deposit (must match assets length)
      */
-    function deposit(address[] memory _assets, uint256[] memory _amounts) external override {
+    function deposit(address[] memory _assets, uint256[] memory _amounts) external override nonReentrant {
         // Access control: only kingVault can call
         _requireKingVault();
 
@@ -124,6 +125,7 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
         external
         virtual
         override
+        nonReentrant
     {
         // Access control: only kingVault can call
         _requireKingVault();
@@ -295,6 +297,7 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
         external
         virtual
         override
+        nonReentrant
     {
         // Access control: only owner can set distribution
         _requireOwner();
@@ -357,7 +360,7 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
      * @dev Same percentages apply to all tokens (not per-token distribution)
      * @dev Iterates through _assets array for tokens, _profitsRecipients array for recipients
      */
-    function distributeProfits() external virtual override {
+    function distributeProfits() external virtual override nonReentrant {
         // Access control: only owner can distribute
         _requireOwner();
 
@@ -512,7 +515,7 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
      * @param _tokens Array of asset addresses to register
      * @param _accepted Array of acceptance status (true = accepted, false = not accepted)
      */
-    function registerAssets(address[] memory _tokens, bool[] memory _accepted) external virtual override {
+    function registerAssets(address[] memory _tokens, bool[] memory _accepted) external virtual override nonReentrant {
         _requireOwner();
         _registerAssets(_tokens, _accepted);
     }
@@ -522,7 +525,7 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
      * @dev Only callable by owner (governance)
      * @param _newPriceProvider Address of the new price provider
      */
-    function setPriceProvider(address _newPriceProvider) external {
+    function setPriceProvider(address _newPriceProvider) external nonReentrant {
         _requireOwner();
 
         // Validate address

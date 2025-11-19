@@ -457,7 +457,13 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
      * @param asset Asset address of pending request
      * @return assetsReceived Amount of assets received
      */
-    function completeWithdrawal(address asset) external onlyOwner whenNotPaused returns (uint256 assetsReceived) {
+    function completeWithdrawal(address asset)
+        external
+        onlyOwner
+        whenNotPaused
+        nonReentrant
+        returns (uint256 assetsReceived)
+    {
         // Validate async mode
         if (isAtomic) revert InvalidWithdrawalMode();
 
@@ -562,7 +568,11 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
      * @param _amounts Array of amounts to withdraw
      * @param _receiver Address to receive withdrawn assets
      */
-    function withdraw(address[] memory _tokens, uint256[] memory _amounts, address _receiver) public override {
+    function withdraw(address[] memory _tokens, uint256[] memory _amounts, address _receiver)
+        public
+        override
+        nonReentrant
+    {
         // Access control: only kingVault can call
         _requireKingVault();
 
@@ -577,7 +587,7 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
             revert InvalidAssetArray();
         }
 
-        // CRITICAL: Check availability for ALL assets BEFORE any transfers
+        // Check availability for ALL assets BEFORE any state changes or transfers
         // This ensures atomic behavior - either all succeed or all fail
         for (uint256 i = 0; i < _tokens.length; i++) {
             address token = _tokens[i];
@@ -591,16 +601,20 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
             }
         }
 
-        // All checks passed - execute withdrawals
+        for (uint256 i = 0; i < _tokens.length; i++) {
+            address token = _tokens[i];
+            uint256 amount = _amounts[i];
+
+            // Update principal tracking BEFORE external calls
+            _deposits[token] -= amount;
+        }
+
         for (uint256 i = 0; i < _tokens.length; i++) {
             address token = _tokens[i];
             uint256 amount = _amounts[i];
 
             // Transfer tokens to receiver
             SafeERC20.safeTransfer(IERC20(token), _receiver, amount);
-
-            // Update principal tracking
-            _deposits[token] -= amount;
         }
 
         // Emit event
@@ -656,7 +670,7 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
     // It correctly uses _deposits mapping for principal-only TVL tracking
     // Share appreciation does NOT affect TVL - it's tracked as profit separately
     //
-    // CRITICAL ACCOUNTING:
+    // IMPORTANT ACCOUNTING:
     // - _deposits[asset] only changes when King main vault calls deposit()/withdraw()
     // - Deployment to ERC-4626 vault does NOT affect TVL (principal unchanged)
     // - Share value appreciation does NOT affect TVL
@@ -740,7 +754,7 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
      * @dev Only callable by owner when not paused
      * @dev Profit = (current share value) - (principal deposits)
      */
-    function harvestProfits() external override onlyOwner whenNotPaused {
+    function harvestProfits() external override onlyOwner whenNotPaused nonReentrant {
         // Calculate current profit
         uint256 profitInEth = calculateProfit();
 
@@ -833,7 +847,7 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
      * @dev Processes _queuedProfits and transfers to recipients
      * @dev Type B withdrawal completion - distributes harvested profits
      */
-    function distributeProfits() external override onlyOwner whenNotPaused {
+    function distributeProfits() external override onlyOwner whenNotPaused nonReentrant {
         // Get all assets with queued profits
         address[] memory assetsWithProfits = new address[](_assets.length);
         uint256 count = 0;
