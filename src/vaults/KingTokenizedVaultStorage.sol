@@ -132,10 +132,10 @@ abstract contract KingTokenizedVaultStorage is KingVaultStorage {
 
     /**
      * @dev Storage gap for future upgrades (OpenZeppelin UUPS pattern)
-     * @dev Reserves 45 storage slots to prevent storage collisions
-     * @dev Total storage slots: 50 (5 used + 45 gap)
+     * @dev Reserves 45 slots to complete 50-slot layer (5 used + 45 gap = 50 total)
+     * @dev Parent occupies slots 0-49, this layer occupies slots 50-99
      * @dev Critical for UUPS upgradeability pattern
-     * @dev Subtract used slots when adding new state variables
+     * @dev Follows OpenZeppelin standard: each inheritance layer occupies exactly 50 slots
      */
     uint256[45] private __gap;
 

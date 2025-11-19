@@ -78,10 +78,11 @@ abstract contract KingVaultStorage is Initializable, Ownable2StepUpgradeable, Pa
 
     /**
      * @dev Storage gap to allow for future upgrades
-     * @dev Reserves 50 slots for adding new state variables in future versions
+     * @dev Reserves 43 slots to complete 50-slot layer (7 used + 43 gap = 50 total)
      * @dev Critical for UUPS upgradeability pattern
+     * @dev Follows OpenZeppelin standard: each inheritance layer occupies exactly 50 slots
      */
-    uint256[50] private __gap;
+    uint256[43] private __gap;
 
     // ============================================
     // Internal Helper Functions

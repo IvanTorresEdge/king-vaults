@@ -32,6 +32,7 @@ gas_reports = ["*"]
 via_ir = true
 bytecode_hash = "none"
 cbor_metadata = false
+extra_output = ["storageLayout"]
 
 # File system permissions for deployment scripts
 fs_permissions = [
