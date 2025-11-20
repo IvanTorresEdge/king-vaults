@@ -338,6 +338,9 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
         // Validate asset is registered
         if (!_registeredTokens[asset]) revert AssetNotAccepted(asset);
 
+        // The deposit() call below will revert if the vault is paused, wasting gas
+        // Recommendation: Monitor vault status off-chain or implement vault-specific checks
+
         // Check sufficient idle balance
         uint256 idle = IERC20(asset).balanceOf(address(this));
         if (idle < amount) {

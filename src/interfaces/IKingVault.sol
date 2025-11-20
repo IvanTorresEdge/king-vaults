@@ -192,6 +192,14 @@ interface IKingVault is IERC165 {
      */
     error InvalidMaxPriceAge(uint256 maxAge);
 
+    /**
+     * @notice Thrown when an external vault component is paused
+     * @param externalVault Address of the paused external vault or component
+     * @dev Generic error for any paused external dependency (Teller, Accountant, etc.)
+     * @dev Prevents wasted gas on operations that will fail due to paused external contracts
+     */
+    error ExternalVaultPaused(address externalVault);
+
     // ============================================
     // Core Functions
     // ============================================

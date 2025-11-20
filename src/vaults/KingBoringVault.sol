@@ -390,6 +390,16 @@ contract KingBoringVault is KingBoringVaultStorage, KingVault {
         if (!_registeredTokens[_asset]) revert AssetNotAccepted(_asset);
         if (_amount == 0) revert ZeroAmount();
 
+        // Check external vault pause status before operations
+        // Prevents wasted gas on transactions that will fail due to paused external contracts
+        if (ITellerWithMultiAssetSupport(teller).isPaused()) {
+            revert ExternalVaultPaused(teller);
+        }
+
+        if (IAccountantWithRateProviders(accountant).isPaused()) {
+            revert ExternalVaultPaused(accountant);
+        }
+
         // Check sufficient idle balance
         uint256 idle = IERC20(_asset).balanceOf(address(this));
         if (idle < _amount) {
