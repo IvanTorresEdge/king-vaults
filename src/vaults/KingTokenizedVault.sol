@@ -693,9 +693,6 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
      * @return profitInEth Total profit across all assets in ETH (18 decimals)
      */
     function calculateProfit() public view returns (uint256 profitInEth) {
-        // Get price provider
-        IPriceProvider provider = IPriceProvider(priceProvider);
-
         // Calculate total principal value in ETH
         uint256 totalPrincipalEth = 0;
         for (uint256 i = 0; i < _assets.length; i++) {
@@ -708,9 +705,8 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
             uint256 principal = _deposits[asset];
             if (principal == 0) continue;
 
-            // Get price in ETH
-            uint256 priceInEth = provider.getPriceInEth(asset);
-            if (priceInEth == 0) revert PriceNotAvailable(asset);
+            // Get validated price in ETH (includes staleness and validity checks)
+            uint256 priceInEth = _getValidatedPrice(asset);
 
             // Get decimals
             uint8 decimals = IERC20Metadata(asset).decimals();
@@ -733,9 +729,8 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
         // Get the underlying asset of the ERC-4626 vault
         address underlyingAsset = IERC4626(vault).asset();
 
-        // Convert current assets to ETH
-        uint256 assetPriceInEth = provider.getPriceInEth(underlyingAsset);
-        if (assetPriceInEth == 0) revert PriceNotAvailable(underlyingAsset);
+        // Convert current assets to ETH with validated price
+        uint256 assetPriceInEth = _getValidatedPrice(underlyingAsset);
 
         uint8 assetDecimals = IERC20Metadata(underlyingAsset).decimals();
         uint256 currentValueEth = Math.mulDiv(currentAssets, assetPriceInEth, 10 ** assetDecimals);
@@ -769,9 +764,7 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
         uint256 currentAssets = IERC4626(vault).convertToAssets(totalShares);
         address underlyingAsset = IERC4626(vault).asset();
 
-        IPriceProvider provider = IPriceProvider(priceProvider);
-        uint256 assetPriceInEth = provider.getPriceInEth(underlyingAsset);
-        if (assetPriceInEth == 0) revert PriceNotAvailable(underlyingAsset);
+        uint256 assetPriceInEth = _getValidatedPrice(underlyingAsset);
 
         uint8 assetDecimals = IERC20Metadata(underlyingAsset).decimals();
         uint256 currentValueEth = Math.mulDiv(currentAssets, assetPriceInEth, 10 ** assetDecimals);

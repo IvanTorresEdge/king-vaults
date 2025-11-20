@@ -897,7 +897,6 @@ contract KingBoringVault is KingBoringVaultStorage, KingVault {
 
         // Calculate total principal across all registered assets
         uint256 totalPrincipal = 0;
-        IPriceProvider provider = IPriceProvider(priceProvider);
 
         for (uint256 i = 0; i < _assets.length; i++) {
             address asset = _assets[i];
@@ -910,9 +909,8 @@ contract KingBoringVault is KingBoringVaultStorage, KingVault {
 
             if (deposited == 0) continue;
 
-            // Get asset price in ETH
-            uint256 priceInEth = provider.getPriceInEth(asset);
-            if (priceInEth == 0) revert InvalidPrice();
+            // Get validated asset price in ETH (includes staleness and validity checks)
+            uint256 priceInEth = _getValidatedPrice(asset);
 
             // Get asset decimals
             uint8 decimals = IERC20Metadata(asset).decimals();
@@ -1268,7 +1266,7 @@ contract KingBoringVault is KingBoringVaultStorage, KingVault {
             emptyRequest
         );
 
-        // CRITICAL: Does NOT modify _deposits (profit was never principal)
+        // IMPORTANT: Does NOT modify _deposits (profit was never principal)
         // Shares automatically restored (no internal tracking, use balanceOf())
 
         // 8. Emit event
@@ -1494,7 +1492,7 @@ contract KingBoringVault is KingBoringVaultStorage, KingVault {
     // It correctly uses _deposits mapping for principal-only TVL tracking
     // Share appreciation does NOT affect TVL - it's tracked as profit separately
     //
-    // CRITICAL ACCOUNTING:
+    // IMPORTANT ACCOUNTING:
     // - _deposits[asset] only changes when King main vault calls deposit()/withdraw()
     // - Share value appreciation does NOT affect TVL
     // - Profit = shareValue - principal (separate from TVL)

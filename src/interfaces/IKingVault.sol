@@ -84,6 +84,13 @@ interface IKingVault is IERC165 {
      */
     event PriceProviderUpdated(address oldPriceProvider, address newPriceProvider);
 
+    /**
+     * @notice Emitted when maximum price age is updated
+     * @param oldMaxAge Previous maximum price age in seconds
+     * @param newMaxAge New maximum price age in seconds
+     */
+    event MaxPriceAgeUpdated(uint256 oldMaxAge, uint256 newMaxAge);
+
     // ============================================
     // Custom Errors
     // ============================================
@@ -161,6 +168,29 @@ interface IKingVault is IERC165 {
      * @dev TVL calculation must revert rather than return partial/understated value
      */
     error PriceNotAvailable(address asset);
+
+    /**
+     * @notice Price is stale (too old)
+     * @param asset The asset with stale price
+     * @param priceAge Age of the price in seconds
+     * @param maxAge Maximum allowed price age
+     * @dev Prevents use of outdated oracle prices
+     */
+    error PriceStale(address asset, uint256 priceAge, uint256 maxAge);
+
+    /**
+     * @notice Price is marked as invalid by the oracle
+     * @param asset The asset with invalid price
+     * @dev Oracle has flagged this price as unreliable (circuit breaker triggered, etc.)
+     */
+    error PriceInvalid(address asset);
+
+    /**
+     * @notice Invalid maximum price age value
+     * @param maxAge The invalid max age value provided
+     * @dev Max price age must be > 0 and <= 1 day
+     */
+    error InvalidMaxPriceAge(uint256 maxAge);
 
     // ============================================
     // Core Functions

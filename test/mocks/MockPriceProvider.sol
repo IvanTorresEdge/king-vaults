@@ -15,8 +15,20 @@ contract MockPriceProvider is IPriceProvider {
     /// @notice Mapping of asset address => whether price is set
     mapping(address => bool) private _priceSet;
 
+    /// @notice Mapping of asset address => custom timestamp (0 = use block.timestamp)
+    mapping(address => uint256) private _priceTimestamp;
+
+    /// @notice Mapping of asset address => validity flag
+    mapping(address => bool) private _priceInvalid;
+
     /// @notice Current ETH/USD price (18 decimals)
     uint256 private _ethUsdPrice;
+
+    /// @notice Custom timestamp for ETH/USD price (0 = use block.timestamp)
+    uint256 private _ethUsdTimestamp;
+
+    /// @notice Validity flag for ETH/USD price
+    bool private _ethUsdInvalid;
 
     /// @notice Decimals for ETH/USD price (always 18)
     uint256 private constant _ethUsdDecimals = 18;
@@ -70,6 +82,40 @@ contract MockPriceProvider is IPriceProvider {
     }
 
     /**
+     * @notice Set a custom timestamp for an asset price
+     * @param asset The asset address
+     * @param timestamp The custom timestamp (0 = use block.timestamp)
+     */
+    function setPriceTimestamp(address asset, uint256 timestamp) external {
+        _priceTimestamp[asset] = timestamp;
+    }
+
+    /**
+     * @notice Set the validity flag for an asset price
+     * @param asset The asset address
+     * @param invalid Whether the price should be marked as invalid
+     */
+    function setPriceInvalid(address asset, bool invalid) external {
+        _priceInvalid[asset] = invalid;
+    }
+
+    /**
+     * @notice Set a custom timestamp for ETH/USD price
+     * @param timestamp The custom timestamp (0 = use block.timestamp)
+     */
+    function setEthUsdTimestamp(uint256 timestamp) external {
+        _ethUsdTimestamp = timestamp;
+    }
+
+    /**
+     * @notice Set the validity flag for ETH/USD price
+     * @param invalid Whether the price should be marked as invalid
+     */
+    function setEthUsdInvalid(bool invalid) external {
+        _ethUsdInvalid = invalid;
+    }
+
+    /**
      * @inheritdoc IPriceProvider
      */
     function getPriceInEth(address asset) external view override returns (uint256 priceInEth) {
@@ -82,5 +128,49 @@ contract MockPriceProvider is IPriceProvider {
      */
     function getEthUsdPrice() external view override returns (uint256 ethUsdPrice, uint256 decimals) {
         return (_ethUsdPrice, _ethUsdDecimals);
+    }
+
+    /**
+     * @inheritdoc IPriceProvider
+     */
+    function getPriceDataInEth(address asset)
+        external
+        view
+        override
+        returns (IPriceProvider.PriceData memory priceData)
+    {
+        // If price is not set, return invalid price data instead of reverting
+        // This allows the vault to handle the error appropriately
+        if (!_priceSet[asset]) {
+            priceData.price = 0;
+            priceData.timestamp = 0;
+            priceData.isValid = false;
+            return priceData;
+        }
+
+        // Return price with custom or current timestamp and validity flag
+        priceData.price = _pricesInEth[asset];
+        priceData.timestamp = _priceTimestamp[asset] == 0 ? block.timestamp : _priceTimestamp[asset];
+        priceData.isValid = !_priceInvalid[asset];
+
+        return priceData;
+    }
+
+    /**
+     * @inheritdoc IPriceProvider
+     */
+    function getEthUsdPriceData()
+        external
+        view
+        override
+        returns (IPriceProvider.PriceData memory priceData, uint256 decimals)
+    {
+        // Return ETH/USD price with custom or current timestamp and validity flag
+        priceData.price = _ethUsdPrice;
+        priceData.timestamp = _ethUsdTimestamp == 0 ? block.timestamp : _ethUsdTimestamp;
+        priceData.isValid = !_ethUsdInvalid;
+        decimals = _ethUsdDecimals;
+
+        return (priceData, decimals);
     }
 }

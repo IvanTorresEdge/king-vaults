@@ -58,6 +58,10 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
         kingVault = _kingVault;
         priceProvider = _priceProvider;
 
+        // Set default max price age to 6 hours (21600 seconds)
+        // This can be changed later by owner using setMaxPriceAge()
+        maxPriceAge = 6 hours;
+
         // Register initial tokens if provided
         if (_tokens.length > 0) {
             _registerAssets(_tokens, _accepted);
@@ -541,6 +545,62 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
         emit PriceProviderUpdated(oldProvider, _newPriceProvider);
     }
 
+    /**
+     * @notice Set the maximum allowed price age
+     * @dev Only callable by owner (governance)
+     * @param _maxPriceAge Maximum price age in seconds (e.g., 3600 for 1 hour)
+     */
+    function setMaxPriceAge(uint256 _maxPriceAge) external {
+        _requireOwner();
+
+        // Validate: max price age should be reasonable (> 0 and < 1 day)
+        if (_maxPriceAge == 0 || _maxPriceAge > 1 days) {
+            revert InvalidMaxPriceAge(_maxPriceAge);
+        }
+
+        uint256 oldMaxAge = maxPriceAge;
+        maxPriceAge = _maxPriceAge;
+
+        emit MaxPriceAgeUpdated(oldMaxAge, _maxPriceAge);
+    }
+
+    // ============================================
+    // Internal Price Validation
+    // ============================================
+
+    /**
+     * @notice Get validated price for an asset
+     * @dev Checks price staleness and validity before returning
+     * @param asset The asset to get price for
+     * @return price The validated price in ETH (18 decimals)
+     */
+    function _getValidatedPrice(address asset) internal view returns (uint256 price) {
+        IPriceProvider provider = IPriceProvider(priceProvider);
+
+        // Get price data with timestamp and validity flag
+        IPriceProvider.PriceData memory priceData = provider.getPriceDataInEth(asset);
+
+        // Check that price is not zero (most basic check - price must exist)
+        if (priceData.price == 0) {
+            revert PriceNotAvailable(asset);
+        }
+
+        // Check if price is marked as valid by oracle
+        if (!priceData.isValid) {
+            revert PriceInvalid(asset);
+        }
+
+        // Check price staleness if maxPriceAge is set
+        if (maxPriceAge > 0) {
+            uint256 priceAge = block.timestamp - priceData.timestamp;
+            if (priceAge > maxPriceAge) {
+                revert PriceStale(asset, priceAge, maxPriceAge);
+            }
+        }
+
+        return priceData.price;
+    }
+
     // ============================================
     // View Functions
     // ============================================
@@ -554,9 +614,6 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
     function tvl() external view virtual override returns (uint256 ethValue, uint256 usdValue) {
         // Initialize total ETH value
         uint256 totalEth = 0;
-
-        // Get the price provider
-        IPriceProvider provider = IPriceProvider(priceProvider);
 
         // Loop through all assets
         for (uint256 i = 0; i < _assets.length; i++) {
@@ -575,21 +632,10 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
                 continue;
             }
 
-            // Get price in ETH
-            // CRITICAL: If this reverts, token is not registered in price provider
-            // We catch and revert with PriceNotAvailable to prevent understated TVL
-            uint256 priceInEth;
-            try provider.getPriceInEth(token) returns (uint256 price) {
-                priceInEth = price;
-            } catch {
-                revert PriceNotAvailable(token);
-            }
-
-            // CRITICAL: Price must be non-zero for accurate TVL
-            // We revert rather than skip to prevent understated TVL
-            if (priceInEth == 0) {
-                revert PriceNotAvailable(token);
-            }
+            // Get validated price in ETH (includes staleness and validity checks)
+            // IMPORTANT: _getValidatedPrice reverts if price is stale, invalid, or zero
+            // This ensures TVL calculation never uses unreliable prices
+            uint256 priceInEth = _getValidatedPrice(token);
 
             // Get token decimals
             uint8 decimals = _getDecimals(token);
@@ -602,12 +648,29 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
             totalEth += tokenEthValue;
         }
 
-        // Convert ETH value to USD
-        (uint256 ethUsdPrice, uint256 ethUsdDecimals) = provider.getEthUsdPrice();
+        // Convert ETH value to USD with validated price
+        IPriceProvider provider = IPriceProvider(priceProvider);
+        IPriceProvider.PriceData memory ethUsdData;
+        uint256 ethUsdDecimals;
+        (ethUsdData, ethUsdDecimals) = provider.getEthUsdPriceData();
+
+        // Validate ETH/USD price
+        if (!ethUsdData.isValid) {
+            revert PriceInvalid(address(0)); // address(0) indicates ETH/USD price
+        }
+        if (maxPriceAge > 0) {
+            uint256 priceAge = block.timestamp - ethUsdData.timestamp;
+            if (priceAge > maxPriceAge) {
+                revert PriceStale(address(0), priceAge, maxPriceAge);
+            }
+        }
+        if (ethUsdData.price == 0) {
+            revert PriceNotAvailable(address(0));
+        }
 
         // Calculate USD value using mulDiv for precision and overflow safety
         // usdValue = (totalEth * ethUsdPrice) / (10 ** ethUsdDecimals)
-        uint256 totalUsd = Math.mulDiv(totalEth, ethUsdPrice, 10 ** ethUsdDecimals);
+        uint256 totalUsd = Math.mulDiv(totalEth, ethUsdData.price, 10 ** ethUsdDecimals);
 
         return (totalEth, totalUsd);
     }
