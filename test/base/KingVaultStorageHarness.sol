@@ -2,6 +2,8 @@
 pragma solidity ^0.8.25;
 
 import {KingVaultStorage} from "../../src/base/KingVaultStorage.sol";
+import {IKingVault} from "../../src/interfaces/IKingVault.sol";
+import {IERC165} from "@openzeppelin/contracts/interfaces/IERC165.sol";
 
 /**
  * @title KingVaultStorageHarness
@@ -85,5 +87,13 @@ contract KingVaultStorageHarness is KingVaultStorage {
 
     function setProfitsDistribution(address recipient, uint16 percent) external {
         _profitsDistribution[recipient] = percent;
+    }
+
+    /**
+     * @notice ERC-165 interface support
+     * @dev Required for upgrade validation
+     */
+    function supportsInterface(bytes4 interfaceId) external pure returns (bool) {
+        return interfaceId == type(IKingVault).interfaceId || interfaceId == type(IERC165).interfaceId;
     }
 }

@@ -680,7 +680,14 @@ contract KingBoringVaultIntegrationTest is Test {
         // Step 2: Deploy new implementation (BoringVaultV2)
         BoringVaultV2 newImplementation = new BoringVaultV2(address(vaultToken), address(teller), address(accountant));
 
-        // Step 3: Upgrade (owner only)
+        // Step 3: Schedule upgrade with 24-hour timelock
+        vm.prank(owner);
+        boringVault.scheduleUpgrade(address(newImplementation));
+
+        // Fast forward 24 hours
+        vm.warp(block.timestamp + 24 hours);
+
+        // Step 4: Upgrade (owner only)
         vm.prank(owner);
         boringVault.upgradeToAndCall(address(newImplementation), "");
 

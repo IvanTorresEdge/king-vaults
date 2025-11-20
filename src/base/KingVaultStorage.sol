@@ -7,6 +7,7 @@ import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/Pau
 import {Ownable2StepUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
 import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import {IERC165} from "@openzeppelin/contracts/interfaces/IERC165.sol";
 import {IKingVault} from "../interfaces/IKingVault.sol";
 
 /**
@@ -92,12 +93,27 @@ abstract contract KingVaultStorage is
     uint256 public maxPriceAge;
 
     /**
+     * @notice Mapping of implementation address => timestamp when upgrade can be executed
+     * @dev Tracks scheduled upgrades with their timelock expiry
+     * @dev 0 = not scheduled, > 0 = timestamp after which upgrade is allowed
+     */
+    mapping(address => uint256) public upgradeTimelock;
+
+    /**
+     * @notice Timelock delay for upgrades (24 hours)
+     * @dev Provides community review and exit window before upgrades execute
+     * @dev Prevents immediate malicious upgrades and allows mistake detection
+     */
+    uint256 public constant UPGRADE_DELAY = 24 hours;
+
+    /**
      * @dev Storage gap to allow for future upgrades
-     * @dev Reserves 42 slots to complete 50-slot layer (8 used + 42 gap = 50 total)
+     * @dev Reserves 40 slots to complete 50-slot layer (10 used + 40 gap = 50 total)
      * @dev Critical for UUPS upgradeability pattern
      * @dev Follows OpenZeppelin standard: each inheritance layer occupies exactly 50 slots
+     * @dev Reduced from 42 to 40 to account for upgradeTimelock mapping
      */
-    uint256[42] private __gap;
+    uint256[40] private __gap;
 
     // ============================================
     // Internal Helper Functions
@@ -223,14 +239,100 @@ abstract contract KingVaultStorage is
     // ============================================
 
     /**
-     * @notice Authorize contract upgrade
-     * @dev Only owner can authorize upgrades
-     * @dev Required by UUPSUpgradeable
+     * @notice Schedule a contract upgrade with 24-hour timelock
+     * @dev Only owner can schedule upgrades
+     * @dev Validates that new implementation is a contract
+     * @dev Emits UpgradeScheduled event for transparency
+     * @param newImplementation Address of the new implementation contract
+     */
+    function scheduleUpgrade(address newImplementation) external {
+        _checkOwner();
+
+        // Validate new implementation is a contract
+        if (newImplementation.code.length == 0) {
+            revert IKingVault.InvalidContract();
+        }
+
+        // Calculate execution timestamp (current time + 24 hours)
+        uint256 executeAfter = block.timestamp + UPGRADE_DELAY;
+
+        // Store scheduled upgrade
+        upgradeTimelock[newImplementation] = executeAfter;
+
+        // Emit event for transparency
+        emit IKingVault.UpgradeScheduled(newImplementation, executeAfter);
+    }
+
+    /**
+     * @notice Cancel a scheduled upgrade
+     * @dev Only owner can cancel upgrades
+     * @dev Allows mistake correction during timelock period
+     * @dev Emits UpgradeCancelled event for transparency
+     * @param implementation Address of the implementation to cancel
+     */
+    function cancelUpgrade(address implementation) external {
+        _checkOwner();
+
+        // Validate upgrade was actually scheduled
+        if (upgradeTimelock[implementation] == 0) {
+            revert IKingVault.UpgradeNotScheduled();
+        }
+
+        // Clear the scheduled upgrade
+        delete upgradeTimelock[implementation];
+
+        // Emit event for transparency
+        emit IKingVault.UpgradeCancelled(implementation);
+    }
+
+    /**
+     * @notice Authorize contract upgrade with timelock and validation
+     * @dev Implements multi-layered upgrade safety mechanism
+     * @dev Only owner can authorize upgrades (checked via _checkOwner)
+     * @dev Requires 24-hour scheduling delay before execution
+     * @dev Validates new implementation is a contract (not EOA)
+     * @dev Validates new implementation supports IKingVault interface (ERC-165)
+     * @dev Required by UUPSUpgradeable pattern
      * @param newImplementation Address of the new implementation
+     *
+     * @custom:security Upgrade safety through:
+     * 1. 24-hour delay for community review and testing
+     * 2. Contract validation (prevents EOA misconfiguration)
+     * 3. Interface compatibility verification via ERC-165
+     * 4. Cancellation capability during timelock period
      */
     function _authorizeUpgrade(address newImplementation) internal view override {
-        newImplementation; // Silence unused parameter warning
+        // Step 1: Check caller is owner
         _checkOwner();
+
+        // Step 2: Validate new implementation is a contract (not EOA)
+        if (newImplementation.code.length == 0) {
+            revert IKingVault.InvalidContract();
+        }
+
+        // Step 3: Check upgrade has been scheduled via scheduleUpgrade()
+        uint256 executeAfter = upgradeTimelock[newImplementation];
+        if (executeAfter == 0) {
+            revert IKingVault.UpgradeNotScheduled();
+        }
+
+        // Step 4: Check timelock has expired (24 hours have passed)
+        if (block.timestamp < executeAfter) {
+            revert IKingVault.UpgradeTimelockNotExpired(executeAfter, block.timestamp);
+        }
+
+        // Step 5: Verify new implementation supports IKingVault interface
+        // Uses ERC-165 interface detection to prevent incompatible upgrades
+        try IERC165(newImplementation).supportsInterface(type(IKingVault).interfaceId) returns (bool supported) {
+            if (!supported) {
+                revert IKingVault.InvalidInterface();
+            }
+        } catch {
+            // If supportsInterface call fails, implementation is incompatible
+            revert IKingVault.InvalidInterface();
+        }
+
+        // All checks passed - upgrade is authorized
     }
 
     // ============================================

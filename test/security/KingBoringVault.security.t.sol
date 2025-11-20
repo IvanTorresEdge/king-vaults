@@ -744,6 +744,13 @@ contract KingBoringVaultSecurityTest is Test {
         // Deploy new implementation
         KingBoringVault newImpl = new KingBoringVault(address(vaultToken), address(teller), address(accountant));
 
+        // Schedule upgrade with 24-hour timelock
+        vm.prank(owner);
+        boringVault.scheduleUpgrade(address(newImpl));
+
+        // Fast forward 24 hours
+        vm.warp(block.timestamp + 24 hours);
+
         // Owner can upgrade
         vm.prank(owner);
         boringVault.upgradeToAndCall(address(newImpl), "");

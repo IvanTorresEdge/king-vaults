@@ -369,6 +369,12 @@ contract KingVaultIntegrationTest is Test {
         // Deploy new implementation
         KingVaultHarness newImplementation = new KingVaultHarness();
 
+        // Schedule upgrade with 24-hour timelock
+        vault.scheduleUpgrade(address(newImplementation));
+
+        // Fast forward 24 hours
+        vm.warp(block.timestamp + 24 hours);
+
         // Upgrade (using UUPS upgradeToAndCall)
         vault.upgradeToAndCall(address(newImplementation), "");
 

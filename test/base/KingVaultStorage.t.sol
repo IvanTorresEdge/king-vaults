@@ -351,8 +351,15 @@ contract KingVaultStorageTest is Test {
     function test_AuthorizeUpgrade_SucceedsForOwner() public {
         address newImpl = address(new KingVaultStorageHarness());
 
+        // Schedule upgrade with 24-hour timelock
         vm.prank(owner);
-        // Should not revert - owner can upgrade
+        vault.scheduleUpgrade(newImpl);
+
+        // Fast forward 24 hours
+        vm.warp(block.timestamp + 24 hours);
+
+        vm.prank(owner);
+        // Should not revert - owner can upgrade after timelock
         vault.upgradeToAndCall(newImpl, "");
     }
 

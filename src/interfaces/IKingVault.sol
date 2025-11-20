@@ -91,6 +91,19 @@ interface IKingVault is IERC165 {
      */
     event MaxPriceAgeUpdated(uint256 oldMaxAge, uint256 newMaxAge);
 
+    /**
+     * @notice Emitted when a contract upgrade is scheduled
+     * @param newImplementation Address of the new implementation
+     * @param executeAfter Timestamp after which the upgrade can be executed
+     */
+    event UpgradeScheduled(address indexed newImplementation, uint256 executeAfter);
+
+    /**
+     * @notice Emitted when a scheduled upgrade is cancelled
+     * @param implementation Address of the cancelled implementation
+     */
+    event UpgradeCancelled(address indexed implementation);
+
     // ============================================
     // Custom Errors
     // ============================================
@@ -206,6 +219,26 @@ interface IKingVault is IERC165 {
      * @dev Prevents wasted gas on operations that will fail due to paused external contracts
      */
     error ExternalVaultPaused(address externalVault);
+
+    /**
+     * @notice Thrown when attempting to execute an upgrade that hasn't been scheduled
+     * @dev Upgrade must be scheduled via scheduleUpgrade() before execution
+     */
+    error UpgradeNotScheduled();
+
+    /**
+     * @notice Thrown when attempting to execute an upgrade before timelock expires
+     * @param executeAfter Timestamp when the upgrade can be executed
+     * @param currentTime Current block timestamp
+     * @dev Must wait until executeAfter timestamp before executing upgrade
+     */
+    error UpgradeTimelockNotExpired(uint256 executeAfter, uint256 currentTime);
+
+    /**
+     * @notice Thrown when new implementation doesn't support required interface
+     * @dev New implementation must support IKingVault interface via ERC-165
+     */
+    error InvalidInterface();
 
     // ============================================
     // Core Functions
