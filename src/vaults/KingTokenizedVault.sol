@@ -563,7 +563,9 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
     /**
      * @notice Override withdraw to add availability protection
      * @dev Prevents withdrawal of assets locked in shares or queued operations
-     * @dev Validates ALL amounts before executing ANY transfers (atomic check)
+     * @dev Uses atomic availability checks to prevent race conditions
+     * @dev Pattern: Check ALL assets → Update state → Execute transfers
+     * @dev The atomic check pattern ensures either all withdrawals succeed or all fail together
      * @param _tokens Array of asset addresses to withdraw
      * @param _amounts Array of amounts to withdraw
      * @param _receiver Address to receive withdrawn assets
@@ -587,28 +589,34 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
             revert InvalidAssetArray();
         }
 
-        // Check availability for ALL assets BEFORE any state changes or transfers
-        // This ensures atomic behavior - either all succeed or all fail
+        // IMPORTANT: Check availability for ALL assets BEFORE any state changes or transfers
+        // This prevents race conditions where state changes between check and execution (HIGH-3 fix)
+        // The atomic check pattern ensures either all withdrawals succeed or all fail together
         for (uint256 i = 0; i < _tokens.length; i++) {
             address token = _tokens[i];
             uint256 amount = _amounts[i];
 
             if (amount == 0) revert ZeroAmount();
 
+            // ATOMIC CHECK: Verify availability before proceeding
+            // This prevents withdrawing assets locked in vault shares or queued operations
             uint256 available = availableForWithdraw(token);
             if (available < amount) {
                 revert InsufficientAvailableBalance(token, amount, available);
             }
         }
 
+        // All availability checks passed - safe to update state
+        // Update principal tracking BEFORE external calls (CEI pattern)
         for (uint256 i = 0; i < _tokens.length; i++) {
             address token = _tokens[i];
             uint256 amount = _amounts[i];
 
-            // Update principal tracking BEFORE external calls
+            // Update principal tracking
             _deposits[token] -= amount;
         }
 
+        // Execute transfers to receiver
         for (uint256 i = 0; i < _tokens.length; i++) {
             address token = _tokens[i];
             uint256 amount = _amounts[i];

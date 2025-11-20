@@ -636,7 +636,8 @@ contract KingBoringVault is KingBoringVaultStorage, KingVault {
     /**
      * @notice Withdraw assets from vault (overrides parent to add protection)
      * @dev Only callable by King main vault
-     * @dev PROTECTION: Uses availableForWithdraw() to prevent profit contamination
+     * @dev Uses atomic availability checks to prevent race conditions
+     * @dev Pattern: Check ALL assets → Calculate → Update state → Execute transfers
      *
      * @param _assets ERC-20 token addresses to withdraw
      * @param _amounts Token amounts to withdraw (parallel arrays)
@@ -662,6 +663,9 @@ contract KingBoringVault is KingBoringVaultStorage, KingVault {
         uint256[] memory sharesNeeded = new uint256[](_assets.length);
         bool[] memory needsVaultWithdrawal = new bool[](_assets.length);
 
+        // IMPORTANT: Check availability for ALL assets BEFORE any calculations or state changes
+        // This prevents race conditions where state changes between check and execution (HIGH-3 fix)
+        // The atomic check pattern ensures either all withdrawals succeed or all fail together
         for (uint256 i = 0; i < _assets.length; i++) {
             address asset = _assets[i];
             uint256 amount = _amounts[i];
@@ -670,32 +674,42 @@ contract KingBoringVault is KingBoringVaultStorage, KingVault {
             if (amount == 0) revert ZeroAmount();
             if (!_registeredTokens[asset]) revert AssetNotAccepted(asset);
 
-            // Get idle balance
+            // Get idle balance (view function, safe to call)
             uint256 idle = IERC20(asset).balanceOf(address(this));
             idleAmounts[i] = idle;
 
-            if (idle >= amount) {
-                // Sufficient idle balance, no vault withdrawal needed
-                needsVaultWithdrawal[i] = false;
-            } else {
-                // Need to withdraw from BoringVault
+            // Determine if we need to withdraw from BoringVault
+            if (idle < amount) {
                 uint256 needed = amount - idle;
                 neededAmounts[i] = needed;
                 needsVaultWithdrawal[i] = true;
 
-                // PROTECTION: Check availability (prevents profit contamination)
+                // ATOMIC CHECK: Verify availability before proceeding
+                // This prevents profit contamination and ensures funds are not reserved elsewhere
                 uint256 available = availableForWithdraw(asset);
                 if (needed > available) {
                     revert InsufficientAvailableBalance(asset, needed, available);
                 }
+            } else {
+                needsVaultWithdrawal[i] = false;
+            }
+        }
+
+        // All availability checks passed - now calculate shares needed
+        // Safe to proceed since we know funds are available and not reserved
+
+        for (uint256 i = 0; i < _assets.length; i++) {
+            if (needsVaultWithdrawal[i]) {
+                address asset = _assets[i];
 
                 // Calculate shares needed for remaining amount
                 uint256 rate = IAccountantWithRateProviders(accountant).getRateInQuoteSafe(ERC20(asset));
                 uint8 decimals = IAccountantWithRateProviders(accountant).decimals();
-                sharesNeeded[i] = Math.mulDiv(needed, 10 ** decimals, rate);
+                sharesNeeded[i] = Math.mulDiv(neededAmounts[i], 10 ** decimals, rate);
             }
         }
 
+        // Update principal tracking before external calls (CEI pattern)
         for (uint256 i = 0; i < _assets.length; i++) {
             address asset = _assets[i];
             uint256 amount = _amounts[i];
@@ -704,6 +718,7 @@ contract KingBoringVault is KingBoringVaultStorage, KingVault {
             _deposits[asset] -= amount;
         }
 
+        // Execute transfers and vault withdrawals
         for (uint256 i = 0; i < _assets.length; i++) {
             address asset = _assets[i];
             uint256 idle = idleAmounts[i];
