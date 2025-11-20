@@ -145,6 +145,13 @@ interface IKingVault is IERC165 {
     error ZeroAddress();
 
     /**
+     * @notice Thrown when an address is not a contract
+     * @dev Used to validate that kingVault and other critical addresses are contracts, not EOAs
+     * @dev Prevents accidental misconfiguration and ensures programmatic control
+     */
+    error InvalidContract();
+
+    /**
      * @notice Thrown when profit distribution total does not equal 100%
      * @param actual The actual total percentage in BPS
      */

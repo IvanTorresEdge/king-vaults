@@ -8,6 +8,7 @@ import {KingTokenizedVault} from "../../../src/vaults/KingTokenizedVault.sol";
 import {MockERC20} from "../../mocks/MockERC20.sol";
 import {MockPriceProvider} from "../../mocks/MockPriceProvider.sol";
 import {MockERC4626Vault} from "../../mocks/MockERC4626Vault.sol";
+import {MockKingVaultController} from "../../mocks/MockKingVaultController.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /**
@@ -76,7 +77,7 @@ contract KingTokenizedVault_TVLTest is Test {
     address public owner = address(0x1);
 
     /// @dev King Protocol main vault - authorized to deposit/withdraw assets
-    address public kingVault = address(0x2);
+    address public kingVault;
 
     // ============================================
     // Constants
@@ -133,6 +134,7 @@ contract KingTokenizedVault_TVLTest is Test {
      *      - Funds kingVault with tokens for deposits
      */
     function setUp() public {
+        kingVault = address(new MockKingVaultController());
         // Deploy mock tokens with different decimals
         weth = new MockERC20("Wrapped Ether", "WETH", 18);
         usdc = new MockERC20("USD Coin", "USDC", 6);

@@ -8,6 +8,7 @@ import {KingTokenizedVault} from "../../../src/vaults/KingTokenizedVault.sol";
 import {MockERC20} from "../../mocks/MockERC20.sol";
 import {MockPriceProvider} from "../../mocks/MockPriceProvider.sol";
 import {MockERC4626Vault} from "../../mocks/MockERC4626Vault.sol";
+import {MockKingVaultController} from "../../mocks/MockKingVaultController.sol";
 import {IKingVault} from "../../../src/interfaces/IKingVault.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
@@ -47,7 +48,7 @@ contract KingTokenizedVault_SecurityTest is Test {
     // ============================================
 
     address public owner = address(0x1);
-    address public kingVault = address(0x2);
+    address public kingVault;
     address public unauthorized = address(0x3);
     address public maliciousVault = address(0x4);
 
@@ -56,6 +57,7 @@ contract KingTokenizedVault_SecurityTest is Test {
     // ============================================
 
     function setUp() public {
+        kingVault = address(new MockKingVaultController());
         // Deploy mock tokens
         weth = new MockERC20("Wrapped Ether", "WETH", 18);
         usdc = new MockERC20("USD Coin", "USDC", 6);

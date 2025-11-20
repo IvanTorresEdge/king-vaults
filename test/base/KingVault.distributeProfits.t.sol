@@ -8,6 +8,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {KingVaultHarness} from "./KingVaultHarness.sol";
 import {MockERC20} from "../mocks/MockERC20.sol";
 import {MockPriceProvider} from "../mocks/MockPriceProvider.sol";
+import {MockKingVaultController} from "../mocks/MockKingVaultController.sol";
 import {IKingVault} from "../../src/interfaces/IKingVault.sol";
 
 /**
@@ -26,7 +27,7 @@ contract KingVaultDistributeProfitsTest is Test {
     MockERC20 public dai; // 18 decimals
 
     address public owner = address(0x1);
-    address public kingVault = address(0x2);
+    address public kingVault;
     address public treasury = address(0x3);
     address public devFund = address(0x4);
     address public marketingFund = address(0x5);
@@ -35,6 +36,7 @@ contract KingVaultDistributeProfitsTest is Test {
     uint16 public constant HUNDRED_PERCENT = 10000;
 
     function setUp() public {
+        kingVault = address(new MockKingVaultController());
         // Deploy price provider
         priceProvider = new MockPriceProvider(2000e18);
 

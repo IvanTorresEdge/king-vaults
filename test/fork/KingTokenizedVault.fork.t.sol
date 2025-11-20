@@ -9,6 +9,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {MockPriceProvider} from "../mocks/MockPriceProvider.sol";
+import {MockKingVaultController} from "../mocks/MockKingVaultController.sol";
 import {IKingVault} from "../../src/interfaces/IKingVault.sol";
 
 /**
@@ -86,7 +87,7 @@ contract KingTokenizedVault_ForkTest is Test {
     // ============================================
 
     address public owner = address(0x1);
-    address public kingVault = address(0x2);
+    address public kingVault;
 
     // ============================================
     // Whale Addresses (for token transfers)
@@ -100,6 +101,7 @@ contract KingTokenizedVault_ForkTest is Test {
     // ============================================
 
     function setUp() public {
+        kingVault = address(new MockKingVaultController());
         // Skip tests if no RPC URL configured or vault not set
         if (CONCRETE_WETH_VAULT == address(0)) {
             console2.log("SKIPPING FORK TESTS: Concrete vault address not configured");

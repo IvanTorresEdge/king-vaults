@@ -8,6 +8,7 @@ import {IKingVault} from "../../src/interfaces/IKingVault.sol";
 import {MockERC20} from "../mocks/MockERC20.sol";
 import {MockPriceProvider} from "../mocks/MockPriceProvider.sol";
 import {MockTeller, MockAccountant, MockAtomicQueue} from "./KingBoringVault.security.t.sol";
+import {MockKingVaultController} from "../mocks/MockKingVaultController.sol";
 
 /**
  * @title ExternalVaultPauseTest
@@ -24,9 +25,10 @@ contract ExternalVaultPauseTest is Test {
     MockAtomicQueue public atomicQueue;
 
     address public owner = address(0x1);
-    address public kingVault = address(0x2);
+    address public kingVault;
 
     function setUp() public {
+        kingVault = address(new MockKingVaultController());
         // Set block timestamp to reasonable value for testing
         vm.warp(1000 days);
 

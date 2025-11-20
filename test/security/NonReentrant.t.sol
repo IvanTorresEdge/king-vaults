@@ -7,6 +7,7 @@ import {KingBoringVault} from "../../src/vaults/KingBoringVault.sol";
 import {MockERC20} from "../mocks/MockERC20.sol";
 import {MockPriceProvider} from "../mocks/MockPriceProvider.sol";
 import {MockTeller, MockAccountant, MockAtomicQueue} from "./KingBoringVault.security.t.sol";
+import {MockKingVaultController} from "../mocks/MockKingVaultController.sol";
 
 /**
  * @title NonReentrantModifierTest
@@ -21,9 +22,10 @@ contract NonReentrantModifierTest is Test {
     ReentrantCaller public reentrantCaller;
 
     address public owner = address(0x1);
-    address public kingVault = address(0x2);
+    address public kingVault;
 
     function setUp() public {
+        kingVault = address(new MockKingVaultController());
         // Deploy tokens
         weth = new MockERC20("WETH", "WETH", 18);
         vaultToken = new MockERC20("Vault", "VLT", 18);
@@ -128,7 +130,7 @@ contract NonReentrantModifierTest is Test {
      * @notice Test that the modifier prevents actual reentrancy
      * @dev This test proves the nonReentrant modifier is functioning
      */
-    function test_ReentrancyGuard_BlocksReentrancy() public {
+    function test_ReentrancyGuard_BlocksReentrancy() public pure {
         // This test verifies that if we somehow could trigger reentrancy,
         // the guard would block it. The existing comprehensive reentrancy tests
         // in KingBoringVault.reentrancy.t.sol already prove this works,

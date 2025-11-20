@@ -45,6 +45,10 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
         if (_kingVault == address(0)) revert ZeroAddress();
         if (_priceProvider == address(0)) revert ZeroAddress();
 
+        // Validate kingVault is a contract, not an EOA
+        // This prevents accidental misconfiguration and ensures programmatic control
+        if (_kingVault.code.length == 0) revert InvalidContract();
+
         // Initialize parent contracts
         __Ownable2Step_init();
         __Pausable_init();

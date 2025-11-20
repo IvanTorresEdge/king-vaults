@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {KingVaultStorageHarness} from "./KingVaultStorageHarness.sol";
 import {MockERC20} from "../mocks/MockERC20.sol";
+import {MockKingVaultController} from "../mocks/MockKingVaultController.sol";
 import {IKingVault} from "../../src/interfaces/IKingVault.sol";
 
 contract KingVaultStorageTest is Test {
@@ -16,7 +17,7 @@ contract KingVaultStorageTest is Test {
     MockERC20 public token18; // 18 decimals (WETH-like)
 
     address public owner = address(0x1);
-    address public kingVault = address(0x2);
+    address public kingVault;
     address public priceProvider = address(0x3);
     address public unauthorized = address(0x4);
     address public recipient1 = address(0x10);
@@ -24,6 +25,7 @@ contract KingVaultStorageTest is Test {
     address public recipient3 = address(0x12);
 
     function setUp() public {
+        kingVault = address(new MockKingVaultController());
         // Deploy implementation
         implementation = new KingVaultStorageHarness();
 

@@ -4,6 +4,7 @@ pragma solidity ^0.8.25;
 import "forge-std/Test.sol";
 import "../mocks/MockERC20.sol";
 import "../mocks/MockPriceProvider.sol";
+import {MockKingVaultController} from "../mocks/MockKingVaultController.sol";
 import "./KingVaultHarness.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
@@ -18,10 +19,11 @@ contract KingVaultRegisterAssetsTest is Test {
     MockERC20 public weth;
 
     address public owner = address(this);
-    address public kingVault = address(0x1);
+    address public kingVault;
     address public unauthorized = address(0x999);
 
     function setUp() public {
+        kingVault = address(new MockKingVaultController());
         // Deploy mocks
         usdc = new MockERC20("USD Coin", "USDC", 6);
         weth = new MockERC20("Wrapped Ether", "WETH", 18);

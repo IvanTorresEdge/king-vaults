@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {KingVaultHarness} from "./KingVaultHarness.sol";
 import {MockERC20} from "../mocks/MockERC20.sol";
 import {MockPriceProvider} from "../mocks/MockPriceProvider.sol";
+import {MockKingVaultController} from "../mocks/MockKingVaultController.sol";
 import {IKingVault} from "../../src/interfaces/IKingVault.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
@@ -27,7 +28,7 @@ contract KingVaultPauseTest is Test {
     function setUp() public {
         // Setup test accounts
         owner = address(this);
-        kingVault = address(0x1);
+        kingVault = address(new MockKingVaultController());
         unauthorized = address(0x2);
 
         // Deploy mock price provider

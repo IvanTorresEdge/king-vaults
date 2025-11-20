@@ -7,6 +7,7 @@ import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.s
 import {KingBoringVault} from "../../../src/vaults/KingBoringVault.sol";
 import {MockERC20} from "../../mocks/MockERC20.sol";
 import {MockPriceProvider} from "../../mocks/MockPriceProvider.sol";
+import {MockKingVaultController} from "../../mocks/MockKingVaultController.sol";
 import {IKingVault} from "../../../src/interfaces/IKingVault.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
@@ -46,7 +47,7 @@ contract DepositsTest is Test {
     // ============================================
 
     address public owner = address(0x1);
-    address public kingVault = address(0x2);
+    address public kingVault;
     address public unauthorized = address(0x3);
 
     // ============================================
@@ -61,6 +62,7 @@ contract DepositsTest is Test {
     // ============================================
 
     function setUp() public {
+        kingVault = address(new MockKingVaultController());
         // Deploy mock tokens
         weth = new MockERC20("Wrapped Ether", "WETH", 18);
         ethfi = new MockERC20("EtherFi Token", "ETHFI", 18);

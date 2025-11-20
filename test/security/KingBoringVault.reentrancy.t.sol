@@ -13,6 +13,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 // Import mock contracts from the security test file
 import {MockTeller, MockAccountant, MockAtomicQueue} from "./KingBoringVault.security.t.sol";
+import {MockKingVaultController} from "../mocks/MockKingVaultController.sol";
 
 /**
  * @title KingBoringVaultReentrancyTest
@@ -40,7 +41,7 @@ contract KingBoringVaultReentrancyTest is Test {
     // ============================================
 
     address public owner = address(0x1);
-    address public kingVault = address(0x2);
+    address public kingVault;
     address public attacker = address(0x3);
 
     // ============================================
@@ -48,6 +49,7 @@ contract KingBoringVaultReentrancyTest is Test {
     // ============================================
 
     function setUp() public {
+        kingVault = address(new MockKingVaultController());
         // Deploy standard tokens
         weth = new MockERC20("Wrapped Ether", "WETH", 18);
         vaultToken = new MockERC20("Boring Vault Shares", "bvWETH", 18);
