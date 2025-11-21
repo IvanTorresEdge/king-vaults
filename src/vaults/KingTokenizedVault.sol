@@ -89,6 +89,20 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
     error NoProfitsQueued();
 
     /**
+     * @notice Thrown when attempting withdrawFromVault() while profits are already queued
+     * @dev Mutex protection: Only one queued operation (withdrawal OR profit) allowed at a time
+     * @dev Complete or cancel profit distribution first via distributeProfits() or cancelProfitsHarvest()
+     */
+    error ProfitsAlreadyQueued();
+
+    /**
+     * @notice Thrown when attempting harvestProfits() while withdrawal is already queued
+     * @dev Mutex protection: Only one queued operation (withdrawal OR profit) allowed at a time
+     * @dev Complete or cancel withdrawal first via completeWithdrawal() or cancelWithdrawal()
+     */
+    error WithdrawalAlreadyQueued();
+
+    /**
      * @notice Thrown when slippage protection fails (received < expected)
      * @param expected Expected shares/assets based on conversion rate
      * @param received Actual shares/assets received
@@ -323,6 +337,70 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
     }
 
     /**
+     * @notice Deposit assets from King main vault (override to adjust balance snapshots)
+     * @dev Overrides parent KingVault.deposit() to update balance snapshots for queued operations
+     * @dev Only callable by King main vault
+     * @dev After parent deposit logic completes, adjusts snapshots for any active queued operations
+     *
+     * @param _assets ERC-20 token addresses to deposit
+     * @param _amounts Token amounts to deposit (parallel arrays)
+     *
+     * @custom:override Adds snapshot adjustment after parent deposit logic
+     * @custom:security Maintains arrival detection accuracy when new deposits arrive
+     *
+     * Workflow:
+     * 1. Execute parent deposit logic (transfers, update _deposits)
+     * 2. For each asset deposited:
+     *    - Call _adjustBalanceSnapshots(asset, amount, true) to update snapshots
+     *    - This ensures queued withdrawal/profit tracking remains accurate
+     *
+     * Example:
+     * ```solidity
+     * // State: _queuedWithdraw[WETH] = {amount: 100, balanceSnapshot: 50}
+     * // kingVault calls deposit([WETH], [20])
+     * // After parent: balance increased from 50 to 70
+     * // After adjustment: balanceSnapshot = 70 (50 + 20)
+     * // Still waiting for 100 WETH to arrive (need balance >= 170)
+     * ```
+     */
+    function deposit(address[] memory _assets, uint256[] memory _amounts) external override nonReentrant {
+        // Access control: only kingVault can call
+        _requireKingVault();
+
+        // Pause check: cannot deposit when paused
+        _requireNotPaused();
+
+        // Validate arrays non-empty and matching length
+        if (_assets.length == 0 || _assets.length != _amounts.length) {
+            revert InvalidAssetArray();
+        }
+
+        // Process each token deposit
+        for (uint256 i = 0; i < _assets.length; i++) {
+            address token = _assets[i];
+            uint256 amount = _amounts[i];
+
+            // Validate amount > 0
+            if (amount == 0) revert ZeroAmount();
+
+            // Validate token is accepted
+            if (!_registeredTokens[token]) revert AssetNotAccepted(token);
+
+            // Transfer tokens from kingVault to this contract
+            SafeERC20.safeTransferFrom(IERC20(token), msg.sender, address(this), amount);
+
+            // Update deposits mapping (principal tracking)
+            _deposits[token] += amount;
+
+            // Adjust balance snapshots for arrival detection
+            _adjustBalanceSnapshots(token, amount, true); // true = deposit (add)
+        }
+
+        // Emit event with all tokens and amounts
+        emit Deposited(_assets, _amounts, block.timestamp);
+    }
+
+    /**
      * @notice Deploy idle assets to ERC-4626 vault (atomic mode)
      * @dev Only callable by owner when not paused
      * @dev Validates asset, approves vault, deposits and receives shares
@@ -388,6 +466,11 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
         // Validate asset is registered
         if (!_registeredTokens[asset]) revert AssetNotAccepted(asset);
 
+        // Mutex protection: Cannot queue withdrawal if profits are already queued
+        if (_queuedProfits[asset].amount > 0) {
+            revert ProfitsAlreadyQueued();
+        }
+
         // Calculate available shares (total - pending across all assets)
         uint256 totalShares = IERC20(vault).balanceOf(address(this));
         uint256 totalPending = _calculateTotalPendingShares();
@@ -416,7 +499,9 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
             // IMPORTANT: In atomic mode, only profit withdrawals are queued for distribution
             // Principal withdrawals complete immediately and assets become available for Flow A withdrawal
             if (isProfitWithdrawal) {
-                _queuedProfits[asset] += assetsReceived;
+                // Initialize balance snapshot for arrival detection
+                uint256 currentBalance = IERC20(asset).balanceOf(address(this));
+                _queuedProfits[asset] = QueuedAmount({amount: assetsReceived, balanceSnapshot: currentBalance});
             }
             // Note: Principal withdrawals (isProfitWithdrawal=false) do NOT queue in atomic mode
             // Assets are immediately available for withdrawal to kingVault via withdraw()
@@ -498,10 +583,12 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
         // Track in appropriate queue based on withdrawal type (Type A vs Type B)
         if (request.isProfitWithdrawal) {
             // Type B: Profit withdrawal - queue for distribution
-            _queuedProfits[asset] += assetsReceived;
+            uint256 currentBalance = IERC20(asset).balanceOf(address(this));
+            _queuedProfits[asset] = QueuedAmount({amount: assetsReceived, balanceSnapshot: currentBalance});
         } else {
             // Type A: Principal withdrawal - queue for return to main vault
-            _queuedWithdraw[asset] += assetsReceived;
+            uint256 currentBalance = IERC20(asset).balanceOf(address(this));
+            _queuedWithdraw[asset] = QueuedAmount({amount: assetsReceived, balanceSnapshot: currentBalance});
         }
 
         // Clear withdrawal request
@@ -552,11 +639,16 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
         uint256 idle = IERC20(_asset).balanceOf(address(this));
 
         // Get queued amounts (dual tracking)
-        uint256 queuedPrincipal = _queuedWithdraw[_asset];
-        uint256 queuedProfit = _queuedProfits[_asset];
+        uint256 queuedPrincipal = _queuedWithdraw[_asset].amount;
+        uint256 queuedProfit = _queuedProfits[_asset].amount;
 
         // Calculate available (return 0 if queued amounts exceed idle)
         uint256 reserved = queuedPrincipal + queuedProfit;
+
+        // Also reserve expected assets from pending withdrawal requests (async mode)
+        if (_withdrawalRequests[_asset].expected > 0) {
+            reserved += _withdrawalRequests[_asset].expected;
+        }
 
         if (idle <= reserved) return 0;
 
@@ -628,8 +720,154 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
             SafeERC20.safeTransfer(IERC20(token), _receiver, amount);
         }
 
+        // Adjust balance snapshots for all withdrawn assets
+        // This maintains accuracy for arrival detection after assets leave
+        for (uint256 i = 0; i < _tokens.length; i++) {
+            _adjustBalanceSnapshots(_tokens[i], _amounts[i], false); // false = withdraw (subtract)
+        }
+
         // Emit event
         emit Withdrawn(_tokens, _amounts, _receiver, block.timestamp);
+    }
+
+    /**
+     * @notice Emergency withdrawal of only unencumbered idle assets
+     * @dev Overrides parent to respect queued withdrawals and profits
+     * @dev Callable by owner OR King's core vault
+     * @dev Works even when paused (no pause check)
+     * @dev Only withdraws available = idle - queuedWithdraw - queuedProfits
+     *
+     * @custom:security Preserves queued withdrawal operations (_queuedWithdraw)
+     * @custom:security Preserves queued profit distributions (_queuedProfits)
+     * @custom:security Allows pending async withdrawal completions
+     * @custom:security Does NOT touch _pendingSharesByAsset, _withdrawalRequests
+     *
+     * IMPORTANT: Emergency Withdrawal with Pending Operations
+     * =========================================================
+     * This function withdraws ONLY truly idle/unencumbered assets that are not
+     * committed to any pending operations. Assets reserved for:
+     * 1. Pending principal withdrawals (_queuedWithdraw) - REMAIN IN CONTRACT
+     * 2. Pending profit distributions (_queuedProfits) - REMAIN IN CONTRACT
+     *
+     * These reserved assets MUST stay in the contract so that:
+     * - Async withdrawal requests can complete via completeWithdrawal()
+     * - Profit distributions can complete via distributeProfits()
+     *
+     * DAO Emergency Response Workflow:
+     * 1. Call emergencyWithdraw() - recovers only available assets
+     * 2. Separately handle queued principal withdrawals:
+     *    - Wait for async completion OR
+     *    - Cancel via cancelWithdrawal() to restore assets
+     * 3. Separately handle queued profits:
+     *    - Complete distribution via distributeProfits() OR
+     *    - Cancel via cancelProfitsHarvest() to restore shares
+     *
+     * Why This Approach:
+     * - Preserves atomicity of pending async operations
+     * - Prevents breaking async withdrawal integrations
+     * - Maintains accounting integrity (_queuedWithdraw/_queuedProfits accurate)
+     * - Allows selective recovery without disrupting active operations
+     *
+     * Example Scenario:
+     * ```
+     * Initial State:
+     * - Idle balance: 100 WETH
+     * - _deposits[WETH]: 1000e18
+     * - _queuedWithdraw[WETH]: 60e18 (Type A - principal withdrawal pending)
+     * - _queuedProfits[WETH]: 30e18 (Type B - profit harvest pending)
+     *
+     * emergencyWithdraw() Execution:
+     * - Available = 100 - 60 - 30 = 10 WETH
+     * - Transfers 10 WETH to kingVault (ONLY the unencumbered amount)
+     * - _deposits[WETH] = 990e18 (reduced by 10)
+     * - Remaining balance = 90 WETH (reserved for pending operations)
+     *
+     * State After:
+     * - Idle balance: 90 WETH (60 for withdrawal, 30 for profits)
+     * - _deposits[WETH]: 990e18
+     * - _queuedWithdraw[WETH]: 60e18 (UNCHANGED - can still complete)
+     * - _queuedProfits[WETH]: 30e18 (UNCHANGED - can still distribute)
+     * - _pendingSharesByAsset[WETH]: UNCHANGED
+     * - _withdrawalRequests[WETH]: UNCHANGED
+     *
+     * DAO Next Steps:
+     * - Async withdrawal completes → completeWithdrawal()
+     * - Distribute 30 WETH profits → distributeProfits()
+     * - Both operations complete successfully with reserved assets
+     * ```
+     */
+    function emergencyWithdraw() external override {
+        // Access control: owner or kingVault can call
+        _requireOwnerOrKingVault();
+
+        // No pause check - works even when paused
+
+        // Prepare arrays for event
+        address[] memory tokens = new address[](_assets.length);
+        uint256[] memory amounts = new uint256[](_assets.length);
+        uint256 count = 0;
+
+        // Loop through all registered tokens
+        for (uint256 i = 0; i < _assets.length; i++) {
+            address token = _assets[i];
+
+            // Skip if token is not registered/accepted
+            if (!_registeredTokens[token]) {
+                continue;
+            }
+
+            // Get current idle balance
+            uint256 idle = IERC20(token).balanceOf(address(this));
+
+            // Calculate reserved amounts (queued for pending operations)
+            uint256 reserved = _queuedWithdraw[token].amount + _queuedProfits[token].amount;
+
+            // Also reserve expected assets from pending withdrawal requests (async mode)
+            // This prevents emergency withdraw from taking assets we're expecting to receive
+            if (_withdrawalRequests[token].expected > 0) {
+                reserved += _withdrawalRequests[token].expected;
+            }
+
+            // Only withdraw if there's available (unencumbered) balance
+            if (idle > reserved) {
+                uint256 available = idle - reserved;
+
+                // Transfer only available amount to kingVault
+                SafeERC20.safeTransfer(IERC20(token), kingVault, available);
+
+                // Reduce deposits by withdrawn amount (NOT to zero!)
+                _deposits[token] -= available;
+
+                // Add to event arrays
+                tokens[count] = token;
+                amounts[count] = available;
+                count++;
+            }
+            // Note: If idle <= reserved, we don't withdraw anything for this token
+            // The reserved assets stay in contract for pending operations
+        }
+
+        // Resize arrays to actual count (remove empty slots)
+        address[] memory finalTokens = new address[](count);
+        uint256[] memory finalAmounts = new uint256[](count);
+        for (uint256 i = 0; i < count; i++) {
+            finalTokens[i] = tokens[i];
+            finalAmounts[i] = amounts[i];
+        }
+
+        // Emit event with withdrawn tokens and amounts
+        emit EmergencyWithdraw(finalTokens, finalAmounts, block.timestamp);
+
+        // IMPORTANT: State variables NOT modified:
+        // - _pendingSharesByAsset[token] - unchanged (shares still pending)
+        // - _queuedWithdraw[token] - unchanged (principal still queued)
+        // - _queuedProfits[token] - unchanged (profits still queued)
+        // - _withdrawalRequests[token] - unchanged (requests still active)
+        //
+        // This allows:
+        // - Async withdrawals to complete via completeWithdrawal()
+        // - distributeProfits() to complete
+        // - Accounting to remain consistent
     }
 
     /**
@@ -674,6 +912,50 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
     function _calculateTotalPendingShares() internal view returns (uint256 total) {
         for (uint256 i = 0; i < _assets.length; i++) {
             total += _pendingSharesByAsset[_assets[i]];
+        }
+    }
+
+    /**
+     * @notice Adjust balance snapshots for queued operations after deposit/withdraw
+     * @dev Updates balanceSnapshot for both _queuedWithdraw and _queuedProfits if active
+     * @dev Called by deposit() (add amount) and withdraw() (subtract amount) to maintain accuracy
+     *
+     * @param _asset Asset address whose snapshots need adjustment
+     * @param _amount Amount to add (deposit) or subtract (withdraw) from snapshots
+     * @param _isDeposit true if deposit (add), false if withdraw (subtract)
+     *
+     * @custom:formula
+     *   On deposit: snapshot += amount (balance increased, adjust baseline up)
+     *   On withdraw: snapshot -= amount (balance decreased, adjust baseline down)
+     *
+     * @custom:example
+     *   State before: balance=100, snapshot=90, queued=50
+     *   deposit(20): balance=120, snapshot=110, queued=50 (still need 50 more to arrive)
+     *   withdraw(10): balance=110, snapshot=100, queued=50 (still need 50 more to arrive)
+     *
+     * Algorithm:
+     * 1. Check if _queuedWithdraw[_asset] is active (amount > 0)
+     * 2. If active: adjust balanceSnapshot by ± _amount
+     * 3. Repeat for _queuedProfits[_asset]
+     * 4. This maintains arrival detection accuracy across balance changes
+     */
+    function _adjustBalanceSnapshots(address _asset, uint256 _amount, bool _isDeposit) internal {
+        // Adjust _queuedWithdraw snapshot if active
+        if (_queuedWithdraw[_asset].amount > 0) {
+            if (_isDeposit) {
+                _queuedWithdraw[_asset].balanceSnapshot += _amount;
+            } else {
+                _queuedWithdraw[_asset].balanceSnapshot -= _amount;
+            }
+        }
+
+        // Adjust _queuedProfits snapshot if active
+        if (_queuedProfits[_asset].amount > 0) {
+            if (_isDeposit) {
+                _queuedProfits[_asset].balanceSnapshot += _amount;
+            } else {
+                _queuedProfits[_asset].balanceSnapshot -= _amount;
+            }
         }
     }
 
@@ -761,6 +1043,14 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
      * @dev Profit = (current share value) - (principal deposits)
      */
     function harvestProfits() external override onlyOwner whenNotPaused nonReentrant {
+        // Get the underlying asset to check mutex
+        address underlyingAsset = IERC4626(vault).asset();
+
+        // Mutex protection: Cannot harvest profits if withdrawal is already queued
+        if (_queuedWithdraw[underlyingAsset].amount > 0) {
+            revert WithdrawalAlreadyQueued();
+        }
+
         // Calculate current profit
         uint256 profitInEth = calculateProfit();
 
@@ -773,7 +1063,6 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
 
         // Calculate current share value in ETH
         uint256 currentAssets = IERC4626(vault).convertToAssets(totalShares);
-        address underlyingAsset = IERC4626(vault).asset();
 
         uint256 assetPriceInEth = _getValidatedPrice(underlyingAsset);
 
@@ -810,7 +1099,8 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
             }
 
             // Track in profit queue (Type B)
-            _queuedProfits[underlyingAsset] += assetsReceived;
+            uint256 currentBalance = IERC20(underlyingAsset).balanceOf(address(this));
+            _queuedProfits[underlyingAsset] = QueuedAmount({amount: assetsReceived, balanceSnapshot: currentBalance});
 
             // Emit events
             emit ProfitSharesQueued(profitShares, profitInEth);
@@ -858,7 +1148,7 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
 
         for (uint256 i = 0; i < _assets.length; i++) {
             address asset = _assets[i];
-            if (_queuedProfits[asset] > 0) {
+            if (_queuedProfits[asset].amount > 0) {
                 assetsWithProfits[count] = asset;
                 count++;
             }
@@ -869,7 +1159,7 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
         // Process each asset with queued profits
         for (uint256 i = 0; i < count; i++) {
             address asset = assetsWithProfits[i];
-            uint256 profitAmount = _queuedProfits[asset];
+            uint256 profitAmount = _queuedProfits[asset].amount;
 
             // Verify we have the assets
             uint256 balance = IERC20(asset).balanceOf(address(this));
@@ -878,7 +1168,7 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
             }
 
             // Clear queued profits first (reentrancy protection)
-            _queuedProfits[asset] = 0;
+            delete _queuedProfits[asset];
 
             // Transfer profits to main vault
             IERC20(asset).safeTransfer(kingVault, profitAmount);

@@ -83,7 +83,7 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
      * @param _assets Array of asset addresses to deposit
      * @param _amounts Array of amounts to deposit (must match assets length)
      */
-    function deposit(address[] memory _assets, uint256[] memory _amounts) external override nonReentrant {
+    function deposit(address[] memory _assets, uint256[] memory _amounts) external virtual override nonReentrant {
         // Access control: only kingVault can call
         _requireKingVault();
 
@@ -179,8 +179,9 @@ abstract contract KingVault is KingVaultStorage, IKingVault {
      * @dev Callable by owner OR King's core vault
      * @dev Works even when paused (no pause check)
      * @dev Transfers all idle balances back to kingVault and resets deposits
+     * @dev Virtual to allow specialized vaults to override behavior (e.g., respect queued operations)
      */
-    function emergencyWithdraw() external override {
+    function emergencyWithdraw() external virtual override {
         // Access control: owner or kingVault can call
         _requireOwnerOrKingVault();
 

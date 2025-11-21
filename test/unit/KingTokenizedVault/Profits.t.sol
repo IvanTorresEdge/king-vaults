@@ -882,11 +882,12 @@ contract KingTokenizedVault_ProfitsTest is Test {
     }
 
     /**
-     * @notice Test profit distribution with pending withdrawals
+     * @notice Test profit distribution followed by principal withdrawal
      * @dev Verifies:
-     *      - Can distribute profits while principal withdrawal queued
-     *      - Type A and Type B queues don't interfere
-     *      - Accounting remains correct
+     *      - Profits must be distributed before principal withdrawal can be queued (mutex protection)
+     *      - In atomic mode, profit harvest completes immediately but holds assets in _queuedProfits
+     *      - After profit distribution, principal withdrawals can proceed
+     *      - Accounting remains correct throughout the sequence
      */
     function test_edgeCase_profitDistributionWithPendingWithdrawals() public {
         // Setup
@@ -901,20 +902,15 @@ contract KingTokenizedVault_ProfitsTest is Test {
         weth.mint(address(erc4626Vault), 15 ether);
         erc4626Vault.setExchangeRate(1.5e18);
 
-        // Harvest profits (Type B)
+        // Harvest profits (Type B) - in atomic mode, completes immediately and sets _queuedProfits
         vm.prank(owner);
         tokenizedVault.harvestProfits();
 
-        // Queue principal withdrawal (Type A)
-        uint256 remainingShares = tokenizedVault.getVaultShares();
-        vm.prank(owner);
-        tokenizedVault.withdrawFromVault(address(weth), remainingShares, false);
+        // Verify profits are queued (idle balance increased)
+        uint256 idleAfterHarvest = weth.balanceOf(address(tokenizedVault));
+        assertGt(idleAfterHarvest, 0, "Should have idle WETH from profit harvest");
 
-        // Both queues should have assets
-        uint256 idle = weth.balanceOf(address(tokenizedVault));
-        assertGt(idle, 0, "Should have idle WETH from both operations");
-
-        // Distribute profits should work despite pending principal withdrawal
+        // Distribute profits to kingVault - this clears _queuedProfits
         uint256 kingVaultBefore = weth.balanceOf(kingVault);
         vm.prank(owner);
         tokenizedVault.distributeProfits();
@@ -922,8 +918,13 @@ contract KingTokenizedVault_ProfitsTest is Test {
         // Verify profits distributed
         assertGt(weth.balanceOf(kingVault), kingVaultBefore, "Profits should be distributed");
 
+        // NOW we can queue principal withdrawal (Type A) since _queuedProfits is cleared
+        uint256 remainingShares = tokenizedVault.getVaultShares();
+        vm.prank(owner);
+        tokenizedVault.withdrawFromVault(address(weth), remainingShares, false);
+
         // In atomic mode, principal withdrawals complete immediately
-        // After profit distribution, the principal assets should be available for Flow A withdrawal
+        // Principal assets should be available for Flow A withdrawal
         uint256 available = tokenizedVault.availableForWithdraw(address(weth));
         assertGt(available, 0, "Should have principal available for withdrawal");
     }

@@ -99,22 +99,24 @@ abstract contract KingBoringVaultStorage is KingVaultStorage {
 
     /**
      * @notice Tracks profit assets queued for distribution (Type B withdrawals)
-     * @dev asset => amount queued
+     * @dev asset => QueuedAmount struct
      * @dev Incremented when harvestProfits() queues profit withdrawal
      * @dev Cleared when distributeProfits() completes
      * @dev Protects profit assets from being withdrawn as principal
      * @dev CRITICAL: Used by availableForWithdraw() to prevent accounting errors
+     * @dev balanceSnapshot updated on every deposit()/withdraw() to detect asset arrival
      */
-    mapping(address => uint256) internal _queuedProfits;
+    mapping(address => QueuedAmount) internal _queuedProfits;
 
     /**
      * @notice Tracks principal assets queued for return to main vault (Type A withdrawals)
-     * @dev asset => amount queued
+     * @dev asset => QueuedAmount struct
      * @dev Incremented when withdrawFromVault() queues principal withdrawal
      * @dev Cleared when completePrincipalWithdraw() completes
      * @dev CRITICAL: Used by availableForWithdraw() to prevent over-withdrawal
+     * @dev balanceSnapshot updated on every deposit()/withdraw() to detect asset arrival
      */
-    mapping(address => uint256) internal _queuedWithdraw;
+    mapping(address => QueuedAmount) internal _queuedWithdraw;
 
     // ============================================
     // Structs
@@ -135,18 +137,35 @@ abstract contract KingBoringVaultStorage is KingVaultStorage {
         uint64 deadline; // Request deadline timestamp
     }
 
+    /**
+     * @notice Queued amount with balance snapshot for asset arrival detection
+     * @dev Used by _queuedWithdraw and _queuedProfits mappings
+     * @param amount Amount of assets queued for withdrawal/distribution
+     * @param balanceSnapshot Contract balance when queued, updated on deposit()/withdraw()
+     * @dev balanceSnapshot enables detection of asset arrival from external vault:
+     *      - Initial: Set to current balance when withdrawal/profit queued
+     *      - Updates: Incremented on deposit(), decremented on withdraw()
+     *      - Detection: If currentBalance >= balanceSnapshot + amount, assets arrived
+     */
+    struct QueuedAmount {
+        uint256 amount; // Amount queued
+        uint256 balanceSnapshot; // Balance snapshot for arrival detection
+    }
+
     // ============================================
     // Storage Gap
     // ============================================
 
     /**
      * @dev Storage gap for future upgrades (OpenZeppelin UUPS pattern)
-     * @dev Reserves 45 slots to complete 50-slot layer (5 used + 45 gap = 50 total)
+     * @dev Reserves 44 slots to complete 50-slot layer (6 used + 44 gap = 50 total)
+     * @dev Used slots: atomicQueue, maxSlippageBPS+withdrawalDuration, _pendingSharesByAsset,
+     *      _withdrawalRequests, _queuedProfits, _queuedWithdraw
      * @dev Parent occupies slots 0-49, this layer occupies slots 50-99
      * @dev Critical for UUPS upgradeability pattern
      * @dev Follows OpenZeppelin standard: each inheritance layer occupies exactly 50 slots
      */
-    uint256[45] private __gap;
+    uint256[44] private __gap;
 
     // ============================================
     // Constructor
