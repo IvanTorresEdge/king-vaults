@@ -656,11 +656,11 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
     }
 
     /**
-     * @notice Override withdraw to add availability protection
-     * @dev Prevents withdrawal of assets locked in shares or queued operations
-     * @dev Uses atomic availability checks to prevent race conditions
-     * @dev Pattern: Check ALL assets → Update state → Execute transfers
-     * @dev The atomic check pattern ensures either all withdrawals succeed or all fail together
+     * @notice Withdraw principal from idle assets back to King Protocol
+     * @dev Only callable by King main vault
+     * @dev Only withdraws from idle balance (balance - queued operations)
+     * @dev Reverts if insufficient idle. Use withdrawFromVault() first to bring assets back.
+     *
      * @param _tokens Array of asset addresses to withdraw
      * @param _amounts Array of amounts to withdraw
      * @param _receiver Address to receive withdrawn assets
@@ -670,63 +670,41 @@ contract KingTokenizedVault is KingTokenizedVaultStorage, KingVault {
         override
         nonReentrant
     {
-        // Access control: only kingVault can call
         _requireKingVault();
-
-        // Pause check
         _requireNotPaused();
 
-        // Validate receiver
+        if (_tokens.length == 0 || _tokens.length != _amounts.length) revert InvalidAssetArray();
         if (_receiver == address(0)) revert ZeroAddress();
 
-        // Validate arrays
-        if (_tokens.length == 0 || _tokens.length != _amounts.length) {
-            revert InvalidAssetArray();
-        }
-
-        // IMPORTANT: Check availability for ALL assets BEFORE any state changes or transfers
-        // This prevents race conditions where state changes between check and execution (HIGH-3 fix)
-        // The atomic check pattern ensures either all withdrawals succeed or all fail together
+        // Check availability for ALL assets BEFORE any transfers (atomic check)
         for (uint256 i = 0; i < _tokens.length; i++) {
             address token = _tokens[i];
             uint256 amount = _amounts[i];
 
             if (amount == 0) revert ZeroAmount();
 
-            // ATOMIC CHECK: Verify availability before proceeding
-            // This prevents withdrawing assets locked in vault shares or queued operations
+            // Available = idle - queuedWithdraw - queuedProfits - pendingWithdrawalRequests
             uint256 available = availableForWithdraw(token);
-            if (available < amount) {
+            if (amount > available) {
                 revert InsufficientAvailableBalance(token, amount, available);
             }
         }
 
-        // All availability checks passed - safe to update state
-        // Update principal tracking BEFORE external calls (CEI pattern)
+        // Execute transfers and update principal tracking
         for (uint256 i = 0; i < _tokens.length; i++) {
             address token = _tokens[i];
             uint256 amount = _amounts[i];
 
-            // Update principal tracking
-            _deposits[token] -= amount;
-        }
-
-        // Execute transfers to receiver
-        for (uint256 i = 0; i < _tokens.length; i++) {
-            address token = _tokens[i];
-            uint256 amount = _amounts[i];
-
-            // Transfer tokens to receiver
+            // Transfer to receiver
             SafeERC20.safeTransfer(IERC20(token), _receiver, amount);
+
+            // Update principal tracking AFTER successful transfer
+            _deposits[token] -= amount;
+
+            // Adjust balance snapshots for arrival detection
+            _adjustBalanceSnapshots(token, amount, false);
         }
 
-        // Adjust balance snapshots for all withdrawn assets
-        // This maintains accuracy for arrival detection after assets leave
-        for (uint256 i = 0; i < _tokens.length; i++) {
-            _adjustBalanceSnapshots(_tokens[i], _amounts[i], false); // false = withdraw (subtract)
-        }
-
-        // Emit event
         emit Withdrawn(_tokens, _amounts, _receiver, block.timestamp);
     }
 

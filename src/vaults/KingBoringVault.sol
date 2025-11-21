@@ -657,13 +657,11 @@ contract KingBoringVault is KingBoringVaultStorage, KingVault {
     /**
      * @notice Cancel pending principal withdrawal request (Type A)
      * @dev Owner-only function to cancel unfulfilled withdrawal and restore state
-     * @dev CRITICAL: Restores _deposits[_asset] since parent optimistically reduced it
-     * @dev DUAL TRACKING: Decrements _queuedWithdraw[_asset] to clear Type A tracking
+     * @dev Note: _deposits is NOT modified here - it tracks King Protocol principal only
      *
      * @param _asset ERC-20 token address of withdrawal to cancel
      */
     function cancelWithdrawFromVault(address _asset) external onlyOwner whenNotPaused {
-        // Validate address parameter
         if (_asset == address(0)) revert ZeroAddress();
 
         // Validate withdrawal request exists
@@ -672,26 +670,16 @@ contract KingBoringVault is KingBoringVaultStorage, KingVault {
             revert NoWithdrawalQueued();
         }
 
-        // Get queued amount (must be > 0)
+        // Get queued amount for event
         uint256 queuedAmount = _queuedWithdraw[_asset].amount;
-        if (queuedAmount == 0) {
-            revert NoWithdrawalQueued();
-        }
 
         // Create empty AtomicRequest to cancel
         IAtomicQueue.AtomicRequest memory emptyRequest =
             IAtomicQueue.AtomicRequest({deadline: 0, atomicPrice: 0, offerAmount: 0, inSolve: false});
 
-        // SECURITY FIX (Slither): Apply CEI pattern - Effects before Interactions
-        // Update state BEFORE external call to prevent reentrancy
-        _deposits[_asset] += queuedAmount;
-
-        // Clear queued withdrawal tracking
+        // Clear internal state BEFORE external call (CEI pattern)
         delete _queuedWithdraw[_asset];
-
-        // Release pending shares for this asset only
         _pendingSharesByAsset[_asset] -= request.want;
-
         delete _withdrawalRequests[_asset];
 
         // Cancel withdrawal in AtomicQueue (EXTERNAL CALL)
@@ -732,10 +720,10 @@ contract KingBoringVault is KingBoringVaultStorage, KingVault {
     }
 
     /**
-     * @notice Withdraw assets from vault (overrides parent to add protection)
+     * @notice Withdraw principal from idle assets back to King Protocol
      * @dev Only callable by King main vault
-     * @dev Uses atomic availability checks to prevent race conditions
-     * @dev Pattern: Check ALL assets → Calculate → Update state → Execute transfers
+     * @dev Only withdraws from idle balance (balance - queued operations)
+     * @dev Reverts if insufficient idle. Use withdrawFromVault() first to bring assets back.
      *
      * @param _assets ERC-20 token addresses to withdraw
      * @param _amounts Token amounts to withdraw (parallel arrays)
@@ -746,99 +734,40 @@ contract KingBoringVault is KingBoringVaultStorage, KingVault {
         override
         nonReentrant
     {
-        // Access control: only kingVault can call
         _requireKingVault();
-
-        // Pause check: cannot withdraw when paused
         _requireNotPaused();
-        // Validate arrays
-        if (_assets.length != _amounts.length) revert InvalidAssetArray();
+
+        if (_assets.length == 0 || _assets.length != _amounts.length) revert InvalidAssetArray();
         if (_receiver == address(0)) revert ZeroAddress();
 
-        // Temporary storage for withdrawal details
-        uint256[] memory idleAmounts = new uint256[](_assets.length);
-        uint256[] memory neededAmounts = new uint256[](_assets.length);
-        uint256[] memory sharesNeeded = new uint256[](_assets.length);
-        bool[] memory needsVaultWithdrawal = new bool[](_assets.length);
-
-        // IMPORTANT: Check availability for ALL assets BEFORE any calculations or state changes
-        // This prevents race conditions where state changes between check and execution (HIGH-3 fix)
-        // The atomic check pattern ensures either all withdrawals succeed or all fail together
+        // Check availability for ALL assets BEFORE any transfers (atomic check)
         for (uint256 i = 0; i < _assets.length; i++) {
             address asset = _assets[i];
             uint256 amount = _amounts[i];
 
-            // Validate inputs
             if (amount == 0) revert ZeroAmount();
             if (!_registeredTokens[asset]) revert AssetNotAccepted(asset);
 
-            // Get idle balance (view function, safe to call)
-            uint256 idle = IERC20(asset).balanceOf(address(this));
-            idleAmounts[i] = idle;
-
-            // Determine if we need to withdraw from BoringVault
-            if (idle < amount) {
-                uint256 needed = amount - idle;
-                neededAmounts[i] = needed;
-                needsVaultWithdrawal[i] = true;
-
-                // ATOMIC CHECK: Verify availability before proceeding
-                // This prevents profit contamination and ensures funds are not reserved elsewhere
-                uint256 available = availableForWithdraw(asset);
-                if (needed > available) {
-                    revert InsufficientAvailableBalance(asset, needed, available);
-                }
-            } else {
-                needsVaultWithdrawal[i] = false;
+            // Available = idle - queuedWithdraw - queuedProfits
+            uint256 available = availableForWithdraw(asset);
+            if (amount > available) {
+                revert InsufficientAvailableBalance(asset, amount, available);
             }
         }
 
-        // All availability checks passed - now calculate shares needed
-        // Safe to proceed since we know funds are available and not reserved
-
-        for (uint256 i = 0; i < _assets.length; i++) {
-            if (needsVaultWithdrawal[i]) {
-                address asset = _assets[i];
-
-                // Calculate shares needed for remaining amount
-                uint256 rate = IAccountantWithRateProviders(accountant).getRateInQuoteSafe(ERC20(asset));
-                uint8 decimals = IAccountantWithRateProviders(accountant).decimals();
-                sharesNeeded[i] = Math.mulDiv(neededAmounts[i], 10 ** decimals, rate);
-            }
-        }
-
-        // Update principal tracking before external calls (CEI pattern)
+        // Execute transfers and update principal tracking
         for (uint256 i = 0; i < _assets.length; i++) {
             address asset = _assets[i];
             uint256 amount = _amounts[i];
 
-            // Update deposits for all assets
+            // Transfer to receiver
+            SafeERC20.safeTransfer(IERC20(asset), _receiver, amount);
+
+            // Update principal tracking AFTER successful transfer
             _deposits[asset] -= amount;
-        }
 
-        // Execute transfers and vault withdrawals
-        for (uint256 i = 0; i < _assets.length; i++) {
-            address asset = _assets[i];
-            uint256 idle = idleAmounts[i];
-
-            if (!needsVaultWithdrawal[i]) {
-                // Transfer full amount directly from idle
-                SafeERC20.safeTransfer(IERC20(asset), _receiver, _amounts[i]);
-            } else {
-                // Transfer idle first (if any)
-                if (idle > 0) {
-                    SafeERC20.safeTransfer(IERC20(asset), _receiver, idle);
-                }
-
-                // Queue withdrawal from BoringVault for the remaining amount
-                this.withdrawFromVault(asset, sharesNeeded[i], 0);
-            }
-        }
-
-        // Adjust balance snapshots for all withdrawn assets
-        // This maintains accuracy for arrival detection after assets leave
-        for (uint256 i = 0; i < _assets.length; i++) {
-            _adjustBalanceSnapshots(_assets[i], _amounts[i], false); // false = withdraw (subtract)
+            // Adjust balance snapshots for arrival detection
+            _adjustBalanceSnapshots(asset, amount, false);
         }
 
         emit Withdrawn(_assets, _amounts, _receiver, block.timestamp);

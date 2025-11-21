@@ -644,39 +644,20 @@ contract WithdrawalsTest is Test {
     // cancelWithdrawFromVault() Tests
     // ============================================
 
-    function test_cancelWithdrawFromVault_RestoresDeposits() public {
-        // This test verifies that cancelWithdrawFromVault restores _deposits
-        // The scenario is when withdraw() calls withdrawFromVault() and optimistically reduces _deposits
+    function test_cancelWithdrawFromVault_DoesNotModifyDeposits() public {
+        // This test verifies that cancelWithdrawFromVault does NOT modify _deposits
+        // _deposits tracks King Protocol principal only - internal vault operations don't affect it
 
         // Setup: deposit 1000 WETH and deploy all to vault
         _depositAssets(address(weth), 1000e18);
         _deployToVault(address(weth), 1000e18);
 
-        // Now we'll manually set up the state that withdraw() would create:
-        // - It transfers idle (if any)
-        // - It calls withdrawFromVault() for the deficit
-        // - It optimistically reduces _deposits by the deficit amount
-
-        // Since we have no idle, let's directly call withdrawFromVault to queue a withdrawal
         uint256 sharesToWithdraw = 500e18;
-        uint256 expectedAmount = Math.mulDiv(sharesToWithdraw, 1.0e18, 1e18);
 
         vm.prank(owner);
         boringVault.withdrawFromVault(address(weth), sharesToWithdraw, 0);
 
-        // At this point:
-        // - _withdrawalRequests[weth] is set
-        // - _pendingShares = 500
-        // - _queuedWithdraw[weth] = 500
-        // - _deposits[weth] is still 1000 (withdrawFromVault doesn't change it)
-
-        // To simulate what withdraw() does, we need to manually reduce _deposits
-        // But we can't do that from the test. So let's test the actual scenario:
-        // withdraw() is called, which internally calls withdrawFromVault and reduces deposits
-
-        // Actually, let's just test that cancel works correctly by verifying it restores state
-        // The key is that _deposits += queuedAmount happens in cancel
-
+        // _deposits[weth] should still be 1000 (withdrawFromVault doesn't change it)
         uint256 principalBefore = boringVault.getBalance(address(weth));
         assertEq(principalBefore, 1000e18, "Principal unchanged by withdrawFromVault");
 
@@ -684,25 +665,9 @@ contract WithdrawalsTest is Test {
         vm.prank(owner);
         boringVault.cancelWithdrawFromVault(address(weth));
 
-        // After cancel, _deposits should be incremented by queuedAmount
-        // Since withdrawFromVault didn't change _deposits, the cancel will ADD to it
+        // _deposits should STILL be 1000 (cancel doesn't modify _deposits)
         uint256 principalAfter = boringVault.getBalance(address(weth));
-
-        // Wait, this doesn't make sense. Let me re-read the code comment:
-        // "CRITICAL: Restore principal deposits (was reduced optimistically)"
-        // This implies _deposits was already reduced before cancel is called
-        // This only happens when withdraw() calls withdrawFromVault internally
-
-        // So the cancel is meant to undo what withdraw() did
-        // Since we called withdrawFromVault directly (not via withdraw()), _deposits wasn't reduced
-        // Therefore cancel will actually INCREASE _deposits incorrectly
-
-        // Let's instead verify that for a direct withdrawFromVault call,
-        // cancel doesn't break things (even though this isn't the intended use case)
-        assertEq(principalAfter, 1000e18 + expectedAmount, "Cancel adds queuedAmount to deposits");
-
-        // The real test should use the withdraw() flow, but that's complex due to availableForWithdraw
-        // Let's just document that this test shows cancel behavior for direct withdrawFromVault
+        assertEq(principalAfter, 1000e18, "Principal unchanged by cancel");
     }
 
     function test_cancelWithdrawFromVault_ClearsPendingShares() public {
