@@ -1,0 +1,171 @@
+# King Vaults Deployment Configuration
+# This file contains network and vault configurations for deployment automation
+#
+# IMPORTANT: RPC URLs and API keys are loaded from environment variables, NOT from this file.
+# This allows you to safely commit this configuration without exposing credentials.
+#
+# Required environment variables per network:
+# - RPC_URL_{chainId}: RPC endpoint for the network
+# - ETHERSCAN_API_KEY_{chainId}: Etherscan API key for contract verification
+#
+# Example for Ethereum Mainnet (chain ID 1):
+#   export RPC_URL_1="https://mainnet.infura.io/v3/YOUR_INFURA_KEY"
+#   export ETHERSCAN_API_KEY_1="YOUR_ETHERSCAN_API_KEY"
+#
+# Example for Sepolia Testnet (chain ID 11155111):
+#   export RPC_URL_11155111="https://sepolia.infura.io/v3/YOUR_INFURA_KEY"
+#   export ETHERSCAN_API_KEY_11155111="YOUR_ETHERSCAN_API_KEY"
+#
+# You can also use a .env file in the project root (DO NOT COMMIT .env):
+#   RPC_URL_1=https://mainnet.infura.io/v3/YOUR_INFURA_KEY
+#   ETHERSCAN_API_KEY_1=YOUR_ETHERSCAN_API_KEY
+
+# ============================================
+# Network Configurations (by chain ID)
+# ============================================
+
+[networks.1]  # Ethereum Mainnet
+# RPC URL and Etherscan API key are loaded from environment variables:
+# - RPC_URL_1
+# - ETHERSCAN_API_KEY_1
+# king_vault = "0x..."  # Optional: existing vault address for upgrades
+
+# [networks.11155111]  # Sepolia Testnet
+# RPC URL and Etherscan API key are loaded from environment variables:
+# - RPC_URL_11155111
+# - ETHERSCAN_API_KEY_11155111
+# king_vault = "0x..."  # Optional: existing vault address for upgrades
+
+# ============================================
+# Vault Configurations
+# ============================================
+
+# Example configuration for boring-vault-sethfi (mainnet)
+[[vaults]]
+id = "boring-vault-sethfi"
+network = 1  # Ethereum Mainnet
+type = "KingBoringVault"
+name = "sETHFI vault"
+symbol = "sETHFI"
+decimals = 18
+
+# Contract addresses (REPLACE WITH ACTUAL ADDRESSES)
+owner = "0x8d9fF30f8ecBA197fE9492A0fD92310D75d352B9"
+king_vault = "0x8F08B70456eb22f6109F57b8fafE862ED28E6040"
+price_provider = "0x2B90103cdc9Bba6c0dBCAaF961F0B5b1920F19E3"
+atomic_queue = "0xD45884B592E316eB816199615A95C182F75dea07"
+
+# Veda integration addresses (immutable constructor parameters)
+vault_address = "0x86B5780b606940Eb59A062aA85a07959518c0161"
+teller = "0xe2acf9f80a2756E51D1e53F9f41583C84279Fb1f"
+accountant = "0x05A1552c5e18F5A0BB9571b5F2D6a4765ebdA32b"
+
+# Initial assets to register
+assets = [
+    "0xFe0c30065B384F05761f15d0CC899D4F9F9Cc0eB",  # sETHFI
+]
+
+# Profit distribution settings (must total 10000 BPS = 100%)
+# Parallel arrays: recipients[i] receives percents_bps[i]
+profit_recipients = [
+    "0xD08C3c05BE23c8b83E333E9a4E4BA5a3c92d284A",  # TODO: Set recipient address
+]
+profit_percents_bps = [
+    100_00,  # 100% to single recipient
+]
+
+# Example with multiple recipients:
+# profit_recipients = ["0xRecipient1", "0xRecipient2", "0xRecipient3"]
+# profit_percents_bps = [5000, 3000, 2000]  # 50%, 30%, 20%
+
+# ============================================
+# KingTokenizedVault Configurations
+# ============================================
+
+# Example configuration for tokenized-vault-concrete (mainnet - atomic mode)
+[[vaults]]
+id = "concrete-sethfi"
+network = 1  # Ethereum Mainnet
+type = "KingTokenizedVault"
+name = "sEIGEN on Concrete.xyz"
+symbol = "sEIGEN"
+decimals = 27
+
+# Contract addresses (REPLACE WITH ACTUAL ADDRESSES)
+owner = "0x8d9fF30f8ecBA197fE9492A0fD92310D75d352B9"
+king_vault = "0x8F08B70456eb22f6109F57b8fafE862ED28E6040"
+price_provider = "0x2B90103cdc9Bba6c0dBCAaF961F0B5b1920F19E3"
+
+# ERC-4626 integration (immutable constructor parameters)
+vault_address = "0xc50303ECA7e02feAe434F37C88C43AAc368C60C1"
+is_atomic = true  # Atomic withdrawals (immediate)
+
+# Initial assets to register
+assets = [
+    "0xec53bF9167f50cDEB3Ae105f56099aaaB9061F83", # EIGEN
+]
+
+# Profit distribution settings (must total 10000 BPS = 100%)
+profit_recipients = [
+    "0xD08C3c05BE23c8b83E333E9a4E4BA5a3c92d284A",
+]
+profit_percents_bps = [
+    100_00,  # 100% to single recipient
+]
+
+# Example configuration for tokenized-vault-concrete (mainnet - async mode)
+[[vaults]]
+id = "tokenized-vault-concrete-async"
+network = 1  # Ethereum Mainnet
+type = "KingTokenizedVault"
+name = "King Concrete Vault Async"
+symbol = "kingCONA"
+decimals = 18
+
+# Contract addresses (REPLACE WITH ACTUAL ADDRESSES)
+owner = "0x8d9fF30f8ecBA197fE9492A0fD92310D75d352B9"  # TODO: Set protocol owner
+king_vault = "0x8F08B70456eb22f6109F57b8fafE862ED28E6040"  # TODO: Set King core vault
+price_provider = "0x2B90103cdc9Bba6c0dBCAaF961F0B5b1920F19E3"  # TODO: Set price provider
+
+# ERC-4626 integration (immutable constructor parameters)
+vault_address = "0x0000000000000000000000000000000000000000"  # TODO: Set ERC-4626 vault address
+is_atomic = false  # Async withdrawals (queued)
+
+# Initial assets to register
+assets = [
+    "0x0000000000000000000000000000000000000000",  # TODO: Add underlying asset address
+]
+
+# Profit distribution settings (must total 10000 BPS = 100%)
+profit_recipients = [
+    "0xD08C3c05BE23c8b83E333E9a4E4BA5a3c92d284A",  # TODO: Set recipient address
+]
+
+profit_percents_bps = [
+    100_00,  # 100% to single recipient
+]
+
+# Example configuration for boring-vault-usdfi (testnet)
+# [[vaults]]
+# id = "boring-vault-usdfi"
+# network = 11155111  # Sepolia Testnet
+# type = "KingBoringVault"
+# name = "KingUsdFi Vault"
+# symbol = "kingUSDFI"
+# decimals = 6
+
+# # Contract addresses (REPLACE WITH ACTUAL ADDRESSES - TESTNET)
+# owner = "0x0000000000000000000000000000000000000000"  # TODO: Set protocol owner
+# king_vault = "0x0000000000000000000000000000000000000000"  # TODO: Set King core vault
+# price_provider = "0x0000000000000000000000000000000000000000"  # TODO: Set price provider
+# atomic_queue = "0x0000000000000000000000000000000000000000"  # TODO: Set Veda AtomicQueue
+
+# # Veda integration addresses (immutable constructor parameters)
+# vault_address = "0x0000000000000000000000000000000000000000"  # TODO: Set Veda BoringVault
+# teller = "0x0000000000000000000000000000000000000000"  # TODO: Set Veda Teller
+# accountant = "0x0000000000000000000000000000000000000000"  # TODO: Set Veda Accountant
+
+# # Initial assets to register (testnet addresses)
+# assets = [
+#     "0x0000000000000000000000000000000000000000",  # TODO: Add testnet asset addresses
+# ]

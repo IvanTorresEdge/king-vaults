@@ -1,0 +1,1746 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.25;
+
+import {KingVault} from "../base/KingVault.sol";
+import {KingBoringVaultStorage} from "./KingBoringVaultStorage.sol";
+import {IKingVault} from "../interfaces/IKingVault.sol";
+import {ITellerWithMultiAssetSupport} from "../interfaces/external/ITellerWithMultiAssetSupport.sol";
+import {IAccountantWithRateProviders} from "../interfaces/external/IAccountantWithRateProviders.sol";
+import {IAtomicQueue} from "../interfaces/external/IAtomicQueue.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {IPriceProvider} from "../interfaces/IPriceProvider.sol";
+
+/**
+ * @title KingBoringVault
+ * @author King Protocol (https://www.kingprotocol.org)
+ * @custom:security-contact security@kingprotocol.com
+ * @notice King Vault implementation for Veda Finance BoringVault integration
+ * @dev Extends KingVault with Veda-specific deposit/withdrawal logic
+ * @dev Uses atomic deposits (Teller) and asynchronous withdrawals (AtomicQueue)
+ * @dev Tracks principal separately from share appreciation for profit calculation
+ *
+ * Architecture:
+ * - Inherits: KingBoringVaultStorage (state) + KingVault (base logic)
+ * - Integrates: Veda BoringVault ecosystem (Vault, Teller, Accountant, AtomicQueue)
+ * - Pattern: UUPS proxy with storage separation and immutable external addresses
+ *
+ * Key Features:
+ * - Atomic deposits: Assets → Shares in single transaction via Teller
+ * - Asynchronous withdrawals: Queue → Solver fulfillment via AtomicQueue
+ * - Profit tracking: Separate principal from share appreciation
+ * - Configurable: Slippage tolerance, withdrawal duration
+ * - Emergency controls: Pause, upgrade, configuration
+ *
+ * Integration Flow:
+ * 1. deposit(): Transfer asset → BoringVault, deposit to Teller → receive shares
+ * 2. withdraw(): Queue request via AtomicQueue → solver fulfills → transfer asset back
+ * 3. harvestProfits(): Calculate share appreciation → distribute to recipients
+ */
+contract KingBoringVault is KingBoringVaultStorage, KingVault {
+    // ============================================
+    // Constants
+    // ============================================
+
+    /**
+     * @notice Maximum allowed slippage limit (1000 BPS = 10%)
+     * @dev Prevents owner from setting excessive slippage tolerance
+     */
+    uint16 public constant MAX_SLIPPAGE_LIMIT = 10_00; // 10%
+
+    /**
+     * @notice Default slippage tolerance (50 BPS = 0.5%)
+     * @dev Applied during initialization if not specified
+     */
+    uint16 public constant DEFAULT_SLIPPAGE_BPS = 50; // 0.5%
+
+    // ============================================
+    // Custom Errors
+    // ============================================
+
+    /**
+     * @notice Thrown when attempting to withdraw more than available balance
+     * @param asset The asset being withdrawn
+     * @param needed The amount requested for withdrawal
+     * @param available The actual balance available
+     */
+    error InsufficientAvailableBalance(address asset, uint256 needed, uint256 available);
+
+    /**
+     * @notice Thrown when attempting to finalize a withdrawal that hasn't been queued
+     * @dev Check that updateAtomicRequest() was called and solver fulfilled it
+     */
+    error WithdrawalNotQueued();
+
+    /**
+     * @notice Thrown when attempting to cancel a non-existent withdrawal request
+     * @dev Verify getUserAtomicRequest() returns a valid request before canceling
+     */
+    error NoWithdrawalQueued();
+
+    /**
+     * @notice Thrown when attempting to harvest profits with no queued withdrawals
+     * @dev Ensure requestProfitWithdrawal() was called before harvesting
+     */
+    error NoProfitsQueued();
+
+    /**
+     * @notice Thrown when attempting withdrawFromVault() while profits are already queued
+     * @dev Mutex protection: Only one queued operation (withdrawal OR profit) allowed at a time
+     * @dev Complete or cancel profit distribution first via distributeProfits() or cancelProfitsHarvest()
+     */
+    error ProfitsAlreadyQueued();
+
+    /**
+     * @notice Thrown when attempting harvestProfits() while withdrawal is already queued
+     * @dev Mutex protection: Only one queued operation (withdrawal OR profit) allowed at a time
+     * @dev Complete or cancel withdrawal first via completePrincipalWithdraw() or cancelWithdrawFromVault()
+     */
+    error WithdrawalAlreadyQueued();
+
+    /**
+     * @notice Thrown when slippage protection fails (received < expected)
+     * @param expected Expected shares based on accountant rate
+     * @param received Actual shares received from deposit
+     */
+    error SlippageExceeded(uint256 expected, uint256 received);
+
+    /**
+     * @notice Thrown when slippage exceeds maximum allowed limit
+     * @param requested The requested slippage in BPS
+     * @param maximum The maximum allowed slippage in BPS
+     */
+    error SlippageExceedsLimit(uint16 requested, uint16 maximum);
+
+    /**
+     * @notice Thrown when exchange rate is zero or invalid
+     * @dev Indicates Accountant is returning invalid rate data
+     */
+    error InvalidRate();
+
+    /**
+     * @notice Thrown when atomic price exceeds uint88 maximum
+     * @dev AtomicQueue requires prices to fit in uint88
+     */
+    error AtomicPriceOverflow();
+
+    /**
+     * @notice Thrown when asset price in ETH is zero or invalid
+     * @dev Indicates PriceProvider is returning invalid price data
+     */
+    error InvalidPrice();
+
+    /**
+     * @notice Thrown when attempting to harvest profits with no profit available
+     * @dev Indicates share value has not appreciated since last harvest
+     */
+    error NoProfitToHarvest();
+
+    /**
+     * @notice Thrown when share value calculation returns zero
+     * @dev Indicates Accountant is returning zero rate
+     */
+    error NoShareValue();
+
+    /**
+     * @notice Thrown when vault has no shares but profit harvest is attempted
+     * @dev Should never happen in normal flow as deposits create shares
+     */
+    error NoShares();
+
+    /**
+     * @notice Thrown when profit share calculation returns zero
+     * @dev Indicates no actual profit despite profitInEth being positive
+     */
+    error NoProfitShares();
+
+    /**
+     * @notice Thrown when calculated profit shares exceed current vault shares
+     * @dev This indicates a serious calculation error and prevents over-withdrawal
+     */
+    error InvalidProfitCalculation();
+
+    /**
+     * @notice Thrown when base asset address is zero
+     * @dev Base asset must be configured before harvesting profits
+     */
+    error InvalidBaseAsset();
+
+    // ============================================
+    // Events
+    // ============================================
+
+    /**
+     * @notice Emitted when assets are successfully deposited to BoringVault via Teller
+     * @dev Indicates atomic deposit completed and shares received
+     * @param token ERC-20 token address deposited
+     * @param amount Token amount deposited to Teller
+     * @param sharesReceived BoringVault share tokens minted
+     */
+    event DepositCompleted(address indexed token, uint256 amount, uint256 sharesReceived);
+
+    /**
+     * @notice Emitted when withdrawal request is queued in AtomicQueue
+     * @dev Indicates shares committed to pending withdrawal (Type A or Type B)
+     * @param asset ERC-20 token address we expect to receive
+     * @param shareAmount BoringVault shares offered for withdrawal
+     * @param expectedAmount Asset amount expected from solver
+     * @param deadline Unix timestamp after which request expires
+     */
+    event WithdrawalQueued(address indexed asset, uint256 shareAmount, uint256 expectedAmount, uint64 deadline);
+
+    /**
+     * @notice Emitted when withdrawal is fulfilled by solver
+     * @dev Indicates assets received and shares transferred to solver
+     * @param asset ERC-20 token address received
+     * @param amountReceived Actual asset amount received from solver
+     */
+    event WithdrawalConfirmed(address indexed asset, uint256 amountReceived);
+
+    /**
+     * @notice Emitted when withdrawal request is cancelled before fulfillment
+     * @dev Shares returned to available pool, accounting restored
+     * @param asset ERC-20 token address of cancelled request
+     * @param shareAmount BoringVault shares returned to available pool
+     */
+    event WithdrawalCancelled(address indexed asset, uint256 shareAmount);
+
+    /**
+     * @notice Emitted when profit shares are queued for withdrawal (Type B)
+     * @dev Tracks profit harvest initiation before solver fulfillment
+     * @param profitShares BoringVault shares representing profits
+     * @param profitValue ETH-denominated value of profit shares
+     */
+    event ProfitSharesQueued(uint256 profitShares, uint256 profitValue);
+
+    /**
+     * @notice Emitted when principal withdrawal completes (Type A)
+     * @dev Assets returned to King main vault after solver fulfills
+     * @param asset ERC-20 token address withdrawn
+     * @param amount Asset amount transferred to receiver
+     * @param receiver Address receiving assets (King main vault)
+     * @param timestamp Block timestamp of completion
+     */
+    event PrincipalWithdrawCompleted(
+        address indexed asset, uint256 amount, address indexed receiver, uint256 timestamp
+    );
+
+    /**
+     * @notice Emitted when principal withdrawal request is cancelled (Type A)
+     * @dev Principal deposits restored, queued tracking cleared
+     * @param asset ERC-20 token address of cancelled withdrawal
+     * @param amount Asset amount that was queued (now restored)
+     * @param timestamp Block timestamp of cancellation
+     */
+    event WithdrawFromVaultCancelled(address indexed asset, uint256 amount, uint256 timestamp);
+
+    /**
+     * @notice Emitted when profit harvest request is cancelled (Type B)
+     * @dev Profit shares returned to vault, queued profit tracking cleared
+     * @param asset ERC-20 token address of cancelled harvest
+     * @param amount Asset amount that was queued for distribution
+     * @param timestamp Block timestamp of cancellation
+     */
+    event ProfitsHarvestCancelled(address indexed asset, uint256 amount, uint256 timestamp);
+
+    /**
+     * @notice Emitted when maximum slippage tolerance is updated
+     * @dev Affects deposit slippage protection calculations
+     * @param oldSlippage Previous slippage in basis points
+     * @param newSlippage New slippage in basis points
+     */
+    event MaxSlippageUpdated(uint16 oldSlippage, uint16 newSlippage);
+
+    /**
+     * @notice Emitted when AtomicQueue address is updated
+     * @dev Can only be changed when no pending withdrawals exist
+     * @param oldQueue Previous AtomicQueue address
+     * @param newQueue New AtomicQueue address
+     */
+    event AtomicQueueUpdated(address indexed oldQueue, address indexed newQueue);
+
+    /**
+     * @notice Emitted when withdrawal duration default is updated
+     * @dev Affects deadline calculation for new withdrawal requests
+     * @param oldDuration Previous duration in seconds
+     * @param newDuration New duration in seconds
+     */
+    event WithdrawalDurationUpdated(uint64 oldDuration, uint64 newDuration);
+
+    /**
+     * @notice Emitted when proxy is initialized
+     * @dev Tracks initial configuration for monitoring and verification
+     * @param owner Protocol owner address
+     * @param kingVault King Protocol core vault address
+     * @param priceProvider Price oracle address
+     * @param atomicQueue AtomicQueue address for withdrawals
+     * @param timestamp Block timestamp of initialization
+     */
+    event Initialized(
+        address indexed owner, address indexed kingVault, address priceProvider, address atomicQueue, uint256 timestamp
+    );
+
+    // ============================================
+    // Constructor
+    // ============================================
+
+    /**
+     * @notice Initialize immutable Veda integration addresses
+     * @dev Constructor runs once during implementation deployment (NOT proxy)
+     * @dev Disables initializers to prevent implementation contract initialization
+     * @param _vault Veda BoringVault contract address (shares)
+     * @param _teller Veda Teller contract address (deposits)
+     * @param _accountant Veda Accountant contract address (pricing)
+     */
+    constructor(address _vault, address _teller, address _accountant) {
+        if (_vault == address(0)) revert ZeroAddress();
+        if (_teller == address(0)) revert ZeroAddress();
+        if (_accountant == address(0)) revert ZeroAddress();
+
+        vault = _vault;
+        teller = _teller;
+        accountant = _accountant;
+
+        _disableInitializers();
+    }
+
+    // ============================================
+    // Initializer
+    // ============================================
+
+    /**
+     * @notice Initialize proxy state (called once per proxy deployment)
+     * @dev Initializes parent KingVault and BoringVault-specific state
+     * @dev Can only be called once per proxy (initializer modifier)
+     * @param _owner Protocol owner address (access control)
+     * @param _kingVault King Protocol core vault address (deposit/withdraw authorization)
+     * @param _priceProvider Price oracle address (TVL calculations)
+     * @param _atomicQueue Veda AtomicQueue address (withdrawal requests)
+     * @param _assets Initial asset addresses to register
+     * @param _accepted Initial acceptance status for each asset
+     */
+    function initialize(
+        address _owner,
+        address _kingVault,
+        address _priceProvider,
+        address _atomicQueue,
+        address[] memory _assets,
+        bool[] memory _accepted
+    ) external initializer {
+        // Validate all address parameters
+        if (_owner == address(0)) revert ZeroAddress();
+        if (_kingVault == address(0)) revert ZeroAddress();
+        if (_priceProvider == address(0)) revert ZeroAddress();
+        if (_atomicQueue == address(0)) revert ZeroAddress();
+
+        // Initialize parent KingVault
+        __KingVault_init(_owner, _kingVault, _priceProvider, _assets, _accepted);
+
+        // Initialize BoringVault state
+        atomicQueue = _atomicQueue;
+        maxSlippageBPS = DEFAULT_SLIPPAGE_BPS;
+        withdrawalDuration = 7 days;
+
+        // Emit initialization event for auditability
+        emit Initialized(_owner, _kingVault, _priceProvider, _atomicQueue, block.timestamp);
+    }
+
+    // ============================================
+    // Core Vault Operations
+    // ============================================
+
+    /**
+     * @notice Deploy idle assets to BoringVault via Teller (atomic operation)
+     * @dev Owner-only function to deploy assets from this vault to Veda BoringVault
+     * @dev Atomic operation: assets transferred and shares received in single transaction
+     * @dev Does NOT modify _deposits (only King main vault modifies principal tracking)
+     * @dev Slippage protection: minimumMint calculated from maxSlippageBPS
+     *
+     * @param _asset ERC-20 token address to deposit
+     * @param _amount Token amount to deposit
+     * @return shares Amount of BoringVault shares received
+     *
+     * @custom:validation Asset must be registered via registerAssets()
+     * @custom:validation Amount must be > 0
+     * @custom:validation Contract must have sufficient idle balance
+     * @custom:validation Teller must not be paused
+     * @custom:validation Contract must not be paused
+     *
+     * @custom:security Approves BoringVault (NOT Teller) to spend assets
+     * @custom:security Slippage protection via minimumMint calculation
+     * @custom:security Verifies shares received >= minimumMint
+     *
+     * Workflow:
+     * 1. Validate inputs (registered asset, amount > 0, sufficient balance)
+     * 2. Calculate expected shares using accountant rate
+     * 3. Apply slippage protection: minShares = expected × (10000 - maxSlippageBPS) / 10000
+     * 4. Record share balance before deposit
+     * 5. Approve BoringVault to spend assets
+     * 6. Call Teller.deposit() with slippage protection
+     * 7. Verify shares received >= minShares
+     * 8. Emit DepositCompleted event
+     *
+     * Example:
+     * ```solidity
+     * // Deploy 1000 ETHFI to BoringVault
+     * uint256 shares = kingBoringVault.depositToVault(ETHFI, 1000e18);
+     * // Shares received based on current exchange rate
+     * // _deposits[ETHFI] unchanged (managed by King main vault)
+     * ```
+     */
+    function depositToVault(address _asset, uint256 _amount)
+        external
+        onlyOwner
+        whenNotPaused
+        returns (uint256 shares)
+    {
+        // Validate address parameter
+        if (_asset == address(0)) revert ZeroAddress();
+
+        // Validate inputs
+        if (!_registeredTokens[_asset]) revert AssetNotAccepted(_asset);
+        if (_amount == 0) revert ZeroAmount();
+
+        // Check external vault pause status before operations
+        // Prevents wasted gas on transactions that will fail due to paused external contracts
+        if (ITellerWithMultiAssetSupport(teller).isPaused()) {
+            revert ExternalVaultPaused(teller);
+        }
+
+        if (IAccountantWithRateProviders(accountant).isPaused()) {
+            revert ExternalVaultPaused(accountant);
+        }
+
+        // Check sufficient idle balance
+        uint256 idle = IERC20(_asset).balanceOf(address(this));
+        if (idle < _amount) {
+            revert InsufficientAvailableBalance(_asset, _amount, idle);
+        }
+
+        // Calculate expected shares and apply slippage protection
+        uint256 expectedShares = _calculateExpectedShares(_asset, _amount);
+        uint256 minShares = (expectedShares * (10_000 - maxSlippageBPS)) / 10_000;
+
+        // Record share balance before deposit
+        uint256 sharesBefore = IERC20(vault).balanceOf(address(this));
+
+        // SECURITY FIX (Slither): Use SafeERC20.forceApprove() instead of approve()
+        // Handles non-standard ERC20 tokens and prevents approval race conditions
+        SafeERC20.forceApprove(IERC20(_asset), vault, _amount);
+
+        // Execute atomic deposit via Teller
+        shares = ITellerWithMultiAssetSupport(teller).deposit(ERC20(_asset), _amount, minShares);
+
+        // Verify shares received
+        uint256 sharesAfter = IERC20(vault).balanceOf(address(this));
+        uint256 sharesReceived = sharesAfter - sharesBefore;
+
+        if (sharesReceived < minShares) {
+            revert SlippageExceeded(expectedShares, sharesReceived);
+        }
+
+        // NOTE: _deposits[_asset] is NOT modified here
+        // Only King main vault modifies _deposits via deposit()/withdraw()
+        // This is governance deploying already-tracked assets to Veda
+
+        emit DepositCompleted(_asset, _amount, sharesReceived);
+
+        return sharesReceived;
+    }
+
+    /**
+     * @notice Deposit assets from King main vault (override to adjust balance snapshots)
+     * @dev Overrides parent KingVault.deposit() to update balance snapshots for queued operations
+     * @dev Only callable by King main vault
+     * @dev After parent deposit logic completes, adjusts snapshots for any active queued operations
+     *
+     * @param _assets ERC-20 token addresses to deposit
+     * @param _amounts Token amounts to deposit (parallel arrays)
+     *
+     * @custom:override Adds snapshot adjustment after parent deposit logic
+     * @custom:security Maintains arrival detection accuracy when new deposits arrive
+     *
+     * Workflow:
+     * 1. Execute parent deposit logic (transfers, update _deposits)
+     * 2. For each asset deposited:
+     *    - Call _adjustBalanceSnapshots(asset, amount, true) to update snapshots
+     *    - This ensures queued withdrawal/profit tracking remains accurate
+     *
+     * Example:
+     * ```solidity
+     * // State: _queuedWithdraw[WETH] = {amount: 100, balanceSnapshot: 50}
+     * // kingVault calls deposit([WETH], [20])
+     * // After parent: balance increased from 50 to 70
+     * // After adjustment: balanceSnapshot = 70 (50 + 20)
+     * // Still waiting for 100 WETH to arrive (need balance >= 170)
+     * ```
+     */
+    function deposit(address[] memory _assets, uint256[] memory _amounts) external override nonReentrant {
+        // Access control: only kingVault can call
+        _requireKingVault();
+
+        // Pause check: cannot deposit when paused
+        _requireNotPaused();
+
+        // Validate arrays non-empty and matching length
+        if (_assets.length == 0 || _assets.length != _amounts.length) {
+            revert InvalidAssetArray();
+        }
+
+        // Process each token deposit
+        for (uint256 i = 0; i < _assets.length; i++) {
+            address token = _assets[i];
+            uint256 amount = _amounts[i];
+
+            // Validate amount > 0
+            if (amount == 0) revert ZeroAmount();
+
+            // Validate token is accepted
+            if (!_registeredTokens[token]) revert AssetNotAccepted(token);
+
+            // Transfer tokens from kingVault to this contract
+            SafeERC20.safeTransferFrom(IERC20(token), msg.sender, address(this), amount);
+
+            // Update deposits mapping (principal tracking)
+            _deposits[token] += amount;
+
+            // Adjust balance snapshots for arrival detection
+            _adjustBalanceSnapshots(token, amount, true); // true = deposit (add)
+        }
+
+        // Emit event with all tokens and amounts
+        emit Deposited(_assets, _amounts, block.timestamp);
+    }
+
+    /**
+     * @notice Queue withdrawal of assets from BoringVault (principal return, Type A)
+     * @dev Owner-only function to queue principal withdrawal via AtomicQueue
+     * @dev Asynchronous operation: Request queued → solver fulfills → call completePrincipalWithdraw()
+     * @dev DUAL TRACKING: Increments _queuedWithdraw[_asset] to protect from profit contamination
+     *
+     * @param _asset ERC-20 token address we want to receive
+     * @param _shareAmount BoringVault shares to withdraw
+     * @param _deadline Unix timestamp for request expiration (0 = use default withdrawalDuration)
+     */
+    function withdrawFromVault(address _asset, uint256 _shareAmount, uint64 _deadline)
+        external
+        onlyOwner
+        whenNotPaused
+    {
+        if (_asset == address(0)) revert ZeroAddress();
+        if (_shareAmount == 0) revert ZeroAmount();
+        if (!_registeredTokens[_asset]) revert AssetNotAccepted(_asset);
+
+        // Check no pending withdrawal for this asset
+        if (_withdrawalRequests[_asset].deadline > 0) {
+            revert WithdrawalNotQueued();
+        }
+
+        // Mutex protection: Cannot queue withdrawal if profits are already queued
+        if (_queuedProfits[_asset].amount > 0) {
+            revert ProfitsAlreadyQueued();
+        }
+
+        // Check sufficient available shares
+        uint256 currentShares = IERC20(vault).balanceOf(address(this));
+        uint256 totalPending = _calculateTotalPendingShares();
+        uint256 availableShares = currentShares - totalPending;
+
+        if (_shareAmount > availableShares) {
+            revert InsufficientAvailableBalance(vault, _shareAmount, availableShares);
+        }
+
+        // Calculate and validate deadline with bounds checking
+        // Calculate deadline (use default if not provided)
+        uint64 deadline = _deadline == 0 ? uint64(block.timestamp) + withdrawalDuration : _deadline;
+
+        // Calculate expected asset amount from shares
+        uint256 expectedAmount = _calculateExpectedAssets(_asset, _shareAmount);
+
+        // Calculate atomic price with slippage protection
+        uint256 atomicPrice = _calculateAtomicPrice(_asset, _shareAmount, expectedAmount);
+
+        // Create AtomicRequest struct
+        IAtomicQueue.AtomicRequest memory request = IAtomicQueue.AtomicRequest({
+            deadline: deadline,
+            atomicPrice: uint88(atomicPrice),
+            offerAmount: uint96(_shareAmount),
+            inSolve: false
+        });
+
+        // SECURITY FIX (Slither): Apply CEI pattern - Effects before Interactions
+        // Update state BEFORE external calls to prevent reentrancy
+        _withdrawalRequests[_asset] = WithdrawalRequest({
+            asset: _asset,
+            offer: expectedAmount, // IN-TRANSIT ASSET TRACKING
+            want: _shareAmount,
+            deadline: deadline
+        });
+        _pendingSharesByAsset[_asset] += _shareAmount;
+
+        // Initialize balance snapshot for arrival detection
+        uint256 currentBalance = IERC20(_asset).balanceOf(address(this));
+        _queuedWithdraw[_asset] = QueuedAmount({amount: expectedAmount, balanceSnapshot: currentBalance});
+
+        // SECURITY FIX (Slither): Use SafeERC20.forceApprove() instead of approve()
+        // Handles non-standard ERC20 tokens and prevents approval race conditions
+        SafeERC20.forceApprove(IERC20(vault), atomicQueue, _shareAmount);
+
+        // Queue withdrawal in AtomicQueue (EXTERNAL CALL)
+        IAtomicQueue(atomicQueue).updateAtomicRequest(
+            ERC20(vault), // offer: BoringVault shares
+            ERC20(_asset), // want: Asset we expect to receive
+            request
+        );
+
+        emit WithdrawalQueued(_asset, _shareAmount, expectedAmount, deadline);
+    }
+
+    /**
+     * @notice Complete principal withdrawal after solver fulfillment (Type A)
+     * @dev Owner-only function to finalize principal return to King main vault
+     * @dev Call this after solver has fulfilled the AtomicQueue request
+     * @dev DUAL TRACKING: Decrements _queuedWithdraw[_asset] to clear Type A tracking
+     *
+     * @param _asset ERC-20 token address received from solver
+     * @param _amount Asset amount to transfer to receiver
+     * @param _receiver Address to receive assets (typically King main vault)
+     */
+    function completePrincipalWithdraw(address _asset, uint256 _amount, address _receiver)
+        external
+        onlyOwner
+        whenNotPaused
+        nonReentrant
+    {
+        if (_asset == address(0)) revert ZeroAddress();
+        if (_amount == 0) revert ZeroAmount();
+
+        // Validate withdrawal request exists
+        WithdrawalRequest memory request = _withdrawalRequests[_asset];
+        if (request.deadline == 0) {
+            revert WithdrawalNotQueued();
+        }
+
+        // Validate amount is within queued range
+        uint256 queuedAmount = _queuedWithdraw[_asset].amount;
+        if (_amount > queuedAmount) {
+            revert InsufficientAvailableBalance(_asset, _amount, queuedAmount);
+        }
+
+        // Validate receiver
+        if (_receiver == address(0)) revert ZeroAddress();
+
+        // Check sufficient idle balance
+        uint256 idle = IERC20(_asset).balanceOf(address(this));
+        if (idle < _amount) {
+            revert InsufficientAvailableBalance(_asset, _amount, idle);
+        }
+
+        // Transfer assets to receiver (main vault)
+        SafeERC20.safeTransfer(IERC20(_asset), _receiver, _amount);
+
+        // DUAL TRACKING: Clear queued withdraw (Type A tracking)
+        delete _queuedWithdraw[_asset];
+
+        // Release pending shares for this asset only
+        _pendingSharesByAsset[_asset] -= request.want;
+
+        // Delete withdrawal request
+        delete _withdrawalRequests[_asset];
+
+        emit PrincipalWithdrawCompleted(_asset, _amount, _receiver, block.timestamp);
+    }
+
+    /**
+     * @notice Cancel pending principal withdrawal request (Type A)
+     * @dev Owner-only function to cancel unfulfilled withdrawal and restore state
+     * @dev Note: _deposits is NOT modified here - it tracks King Protocol principal only
+     *
+     * @param _asset ERC-20 token address of withdrawal to cancel
+     */
+    function cancelWithdrawFromVault(address _asset) external onlyOwner whenNotPaused {
+        if (_asset == address(0)) revert ZeroAddress();
+
+        // Validate withdrawal request exists
+        WithdrawalRequest memory request = _withdrawalRequests[_asset];
+        if (request.deadline == 0) {
+            revert NoWithdrawalQueued();
+        }
+
+        // Get queued amount for event
+        uint256 queuedAmount = _queuedWithdraw[_asset].amount;
+
+        // Create empty AtomicRequest to cancel
+        IAtomicQueue.AtomicRequest memory emptyRequest =
+            IAtomicQueue.AtomicRequest({deadline: 0, atomicPrice: 0, offerAmount: 0, inSolve: false});
+
+        // Clear internal state BEFORE external call (CEI pattern)
+        delete _queuedWithdraw[_asset];
+        _pendingSharesByAsset[_asset] -= request.want;
+        delete _withdrawalRequests[_asset];
+
+        // Cancel withdrawal in AtomicQueue (EXTERNAL CALL)
+        IAtomicQueue(atomicQueue).updateAtomicRequest(
+            ERC20(vault), // offer: BoringVault shares
+            ERC20(_asset), // want: Asset
+            emptyRequest
+        );
+
+        emit WithdrawFromVaultCancelled(_asset, queuedAmount, block.timestamp);
+    }
+
+    /**
+     * @notice Calculate available balance for withdrawals to main vault (override)
+     * @dev Returns idle balance minus queued operations (principal + profit withdrawals)
+     * @dev Protects assets reserved for Type A (principal) and Type B (profit) operations
+     * @param _asset Asset address to check
+     * @return Available amount that can be safely withdrawn to main vault
+     *
+     * @custom:formula available = idle - queuedPrincipal - queuedProfit
+     * @custom:override Adds withdrawal queue tracking to base implementation
+     */
+    function availableForWithdraw(address _asset) public view override returns (uint256) {
+        // Get current idle balance
+        uint256 idle = IERC20(_asset).balanceOf(address(this));
+
+        // Get queued amounts (dual tracking)
+        uint256 queuedPrincipal = _queuedWithdraw[_asset].amount;
+        uint256 queuedProfit = _queuedProfits[_asset].amount;
+
+        // Calculate available (return 0 if queued amounts exceed idle)
+        uint256 reserved = queuedPrincipal + queuedProfit;
+
+        // Return available (with underflow protection)
+        if (idle <= reserved) return 0;
+
+        return idle - reserved;
+    }
+
+    /**
+     * @notice Withdraw principal from idle assets back to King Protocol
+     * @dev Only callable by King main vault
+     * @dev Only withdraws from idle balance (balance - queued operations)
+     * @dev Reverts if insufficient idle. Use withdrawFromVault() first to bring assets back.
+     *
+     * @param _assets ERC-20 token addresses to withdraw
+     * @param _amounts Token amounts to withdraw (parallel arrays)
+     * @param _receiver Address to receive withdrawn assets (King main vault)
+     */
+    function withdraw(address[] memory _assets, uint256[] memory _amounts, address _receiver)
+        external
+        override
+        nonReentrant
+    {
+        _requireKingVault();
+        _requireNotPaused();
+
+        if (_assets.length == 0 || _assets.length != _amounts.length) revert InvalidAssetArray();
+        if (_receiver == address(0)) revert ZeroAddress();
+
+        // Check availability for ALL assets BEFORE any transfers (atomic check)
+        for (uint256 i = 0; i < _assets.length; i++) {
+            address asset = _assets[i];
+            uint256 amount = _amounts[i];
+
+            if (amount == 0) revert ZeroAmount();
+            if (!_registeredTokens[asset]) revert AssetNotAccepted(asset);
+
+            // Available = idle - queuedWithdraw - queuedProfits
+            uint256 available = availableForWithdraw(asset);
+            if (amount > available) {
+                revert InsufficientAvailableBalance(asset, amount, available);
+            }
+        }
+
+        // Execute transfers and update principal tracking
+        for (uint256 i = 0; i < _assets.length; i++) {
+            address asset = _assets[i];
+            uint256 amount = _amounts[i];
+
+            // Transfer to receiver
+            SafeERC20.safeTransfer(IERC20(asset), _receiver, amount);
+
+            // Update principal tracking AFTER successful transfer
+            _deposits[asset] -= amount;
+
+            // Adjust balance snapshots for arrival detection
+            _adjustBalanceSnapshots(asset, amount, false);
+        }
+
+        emit Withdrawn(_assets, _amounts, _receiver, block.timestamp);
+    }
+
+    /**
+     * @notice Emergency withdrawal of only unencumbered idle assets
+     * @dev Overrides parent to respect queued withdrawals and profits
+     * @dev Callable by owner OR King's core vault
+     * @dev Works even when paused (no pause check)
+     * @dev Only withdraws available = idle - queuedWithdraw - queuedProfits
+     *
+     * @custom:security Preserves queued withdrawal operations (_queuedWithdraw)
+     * @custom:security Preserves queued profit distributions (_queuedProfits)
+     * @custom:security Allows pending solver fulfillments to complete
+     * @custom:security Does NOT touch _pendingSharesByAsset, _withdrawalRequests
+     *
+     * IMPORTANT: Emergency Withdrawal with Pending Operations
+     * =========================================================
+     * This function withdraws ONLY truly idle/unencumbered assets that are not
+     * committed to any pending operations. Assets reserved for:
+     * 1. Pending principal withdrawals (_queuedWithdraw) - REMAIN IN CONTRACT
+     * 2. Pending profit distributions (_queuedProfits) - REMAIN IN CONTRACT
+     *
+     * These reserved assets MUST stay in the contract so that:
+     * - Solvers can fulfill pending AtomicQueue withdrawal requests
+     * - Profit distributions can complete via distributeProfits()
+     *
+     * DAO Emergency Response Workflow:
+     * 1. Call emergencyWithdraw() - recovers only available assets
+     * 2. Separately handle queued principal withdrawals:
+     *    - Wait for solvers to fulfill OR
+     *    - Cancel via cancelWithdrawFromVault() to restore assets
+     * 3. Separately handle queued profits:
+     *    - Complete distribution via distributeProfits() OR
+     *    - Cancel via cancelProfitsHarvest() to restore shares
+     *
+     * Why This Approach:
+     * - Preserves atomicity of pending async operations
+     * - Prevents breaking solver integrations (they still see valid requests)
+     * - Maintains accounting integrity (_queuedWithdraw/_queuedProfits accurate)
+     * - Allows selective recovery without disrupting active operations
+     *
+     * Example Scenario:
+     * ```
+     * Initial State:
+     * - Idle balance: 100 WETH
+     * - _deposits[WETH]: 1000e18
+     * - _queuedWithdraw[WETH]: 60e18 (Type A - principal withdrawal pending)
+     * - _queuedProfits[WETH]: 30e18 (Type B - profit harvest pending)
+     *
+     * emergencyWithdraw() Execution:
+     * - Available = 100 - 60 - 30 = 10 WETH
+     * - Transfers 10 WETH to kingVault (ONLY the unencumbered amount)
+     * - _deposits[WETH] = 990e18 (reduced by 10)
+     * - Remaining balance = 90 WETH (reserved for pending operations)
+     *
+     * State After:
+     * - Idle balance: 90 WETH (60 for withdrawal, 30 for profits)
+     * - _deposits[WETH]: 990e18
+     * - _queuedWithdraw[WETH]: 60e18 (UNCHANGED - solver can still fulfill)
+     * - _queuedProfits[WETH]: 30e18 (UNCHANGED - can still distribute)
+     * - _pendingSharesByAsset[WETH]: UNCHANGED
+     * - _withdrawalRequests[WETH]: UNCHANGED
+     *
+     * DAO Next Steps:
+     * - Solver fulfills 60 WETH withdrawal → completePrincipalWithdraw()
+     * - Distribute 30 WETH profits → distributeProfits()
+     * - Both operations complete successfully with reserved assets
+     * ```
+     */
+    function emergencyWithdraw() external override {
+        // Access control: owner or kingVault can call
+        _requireOwnerOrKingVault();
+
+        // No pause check - works even when paused
+
+        // Prepare arrays for event
+        address[] memory tokens = new address[](_assets.length);
+        uint256[] memory amounts = new uint256[](_assets.length);
+        uint256 count = 0;
+
+        // Loop through all registered tokens
+        for (uint256 i = 0; i < _assets.length; i++) {
+            address token = _assets[i];
+
+            // Skip if token is not registered/accepted
+            if (!_registeredTokens[token]) {
+                continue;
+            }
+
+            // Get current idle balance
+            uint256 idle = IERC20(token).balanceOf(address(this));
+
+            // Calculate reserved amounts (queued for pending operations)
+            uint256 reserved = _queuedWithdraw[token].amount + _queuedProfits[token].amount;
+
+            // Only withdraw if there's available (unencumbered) balance
+            if (idle > reserved) {
+                uint256 available = idle - reserved;
+
+                // Transfer only available amount to kingVault
+                SafeERC20.safeTransfer(IERC20(token), kingVault, available);
+
+                // Reduce deposits by withdrawn amount (NOT to zero!)
+                _deposits[token] -= available;
+
+                // Add to event arrays
+                tokens[count] = token;
+                amounts[count] = available;
+                count++;
+            }
+            // Note: If idle <= reserved, we don't withdraw anything for this token
+            // The reserved assets stay in contract for pending operations
+        }
+
+        // Resize arrays to actual count (remove empty slots)
+        address[] memory finalTokens = new address[](count);
+        uint256[] memory finalAmounts = new uint256[](count);
+        for (uint256 i = 0; i < count; i++) {
+            finalTokens[i] = tokens[i];
+            finalAmounts[i] = amounts[i];
+        }
+
+        // Emit event with withdrawn tokens and amounts
+        emit EmergencyWithdraw(finalTokens, finalAmounts, block.timestamp);
+
+        // IMPORTANT: State variables NOT modified:
+        // - _pendingSharesByAsset[token] - unchanged (shares still pending)
+        // - _queuedWithdraw[token] - unchanged (principal still queued)
+        // - _queuedProfits[token] - unchanged (profits still queued)
+        // - _withdrawalRequests[token] - unchanged (requests still active)
+        //
+        // This allows:
+        // - Solvers to fulfill pending withdrawals
+        // - distributeProfits() to complete
+        // - Accounting to remain consistent
+    }
+
+    // ============================================
+    // Internal Helpers
+    // ============================================
+
+    /**
+     * @notice Calculate expected shares for deposit amount
+     * @dev Queries Accountant for current exchange rate and converts assets to shares
+     * @dev Uses getRateInQuoteSafe() for safety (reverts if Accountant paused)
+     * @param _asset ERC-20 token address being deposited
+     * @param _amount Asset amount to convert to shares
+     * @return expectedShares Estimated shares to receive
+     *
+     * @custom:formula shares = amount × (10^decimals / rate)
+     * @custom:example 1000 ETHFI @ rate 2.0 → 500 shares (assuming 18 decimals)
+     */
+    function _calculateExpectedShares(address _asset, uint256 _amount) internal view returns (uint256 expectedShares) {
+        // Query current exchange rate for this asset
+        uint256 rate = IAccountantWithRateProviders(accountant).getRateInQuoteSafe(ERC20(_asset));
+        if (rate == 0) revert InvalidRate();
+
+        // Get decimals for rate (typically 18)
+        uint8 decimals = IAccountantWithRateProviders(accountant).decimals();
+
+        // Calculate expected shares with proper decimals handling
+        // shares = amount × (10^decimals / rate)
+        expectedShares = Math.mulDiv(_amount, 10 ** decimals, rate);
+    }
+
+    /**
+     * @notice Calculate total ETH value of current vault shares
+     * @dev Queries current share balance and converts to ETH using Accountant rate
+     * @dev Uses getRate() (not Safe variant) since this is view-only calculation
+     * @return value Total value in ETH (18 decimals)
+     *
+     * @custom:formula value = shares × rate / (10^decimals)
+     * @custom:example 500 shares @ rate 2.4 → 1200 ETH
+     */
+    function _calculateVaultShareValue() internal view returns (uint256 value) {
+        // Get current share balance
+        uint256 shares = IERC20(vault).balanceOf(address(this));
+
+        if (shares == 0) return 0;
+
+        // Query current exchange rate
+        uint256 rate = IAccountantWithRateProviders(accountant).getRate();
+        if (rate == 0) revert InvalidRate();
+
+        // Get decimals for rate
+        uint8 decimals = IAccountantWithRateProviders(accountant).decimals();
+
+        // Calculate value with proper decimals handling
+        // value = shares × rate / (10^decimals)
+        value = Math.mulDiv(shares, rate, 10 ** decimals);
+    }
+
+    /**
+     * @notice Calculate expected asset amount from share amount
+     * @dev Converts shares to assets using current Accountant exchange rate
+     * @dev Used for withdrawal calculations
+     * @param _asset ERC-20 token address we expect to receive
+     * @param _shareAmount BoringVault shares to convert
+     * @return expectedAmount Asset amount we expect to receive
+     *
+     * @custom:formula assets = shares × rate / (10^decimals)
+     * @custom:example 100 shares @ rate 2.4 → 240 WETH
+     */
+    function _calculateExpectedAssets(address _asset, uint256 _shareAmount)
+        internal
+        view
+        returns (uint256 expectedAmount)
+    {
+        // Query current exchange rate for this asset
+        uint256 rate = IAccountantWithRateProviders(accountant).getRateInQuoteSafe(ERC20(_asset));
+        if (rate == 0) revert InvalidRate();
+
+        // Get decimals for rate
+        uint8 decimals = IAccountantWithRateProviders(accountant).decimals();
+
+        // Calculate expected assets with proper decimals handling
+        // assets = shares × rate / (10^decimals)
+        expectedAmount = Math.mulDiv(_shareAmount, rate, 10 ** decimals);
+    }
+
+    /**
+     * @notice Calculate atomic price for AtomicQueue withdrawal request
+     * @dev Applies slippage protection to expected amount and calculates price per share
+     * @dev Result must fit in uint88 for AtomicRequest struct
+     * @param _shareAmount BoringVault shares we're offering
+     * @param _expectedAmount Asset amount we expect (before slippage)
+     * @return atomicPrice Minimum price per share (in asset terms, 18 decimals)
+     *
+     * @custom:formula atomicPrice = minAmount × (10^decimals) / shares
+     * @custom:formula minAmount = expectedAmount × (10000 - slippage) / 10000
+     * @custom:example 100 shares for 240 WETH, 50 BPS slippage → price = 239.88 / 100 = 2.3988
+     */
+    function _calculateAtomicPrice(
+        address, /* _asset - unused but kept for interface consistency */
+        uint256 _shareAmount,
+        uint256 _expectedAmount
+    ) internal view returns (uint256 atomicPrice) {
+        // Apply slippage protection to expected amount
+        uint256 minAmount = Math.mulDiv(_expectedAmount, 10_000 - maxSlippageBPS, 10_000);
+
+        // Get decimals for price calculation
+        uint8 decimals = IAccountantWithRateProviders(accountant).decimals();
+
+        // Calculate atomic price: minAmount per share
+        // atomicPrice = minAmount × (10^decimals) / shares
+        atomicPrice = Math.mulDiv(minAmount, 10 ** decimals, _shareAmount);
+
+        // Ensure result fits in uint88 (AtomicRequest struct limitation)
+        if (atomicPrice > type(uint88).max) revert AtomicPriceOverflow();
+    }
+
+    /**
+     * @notice Calculate total pending shares across all assets
+     * @dev Sums _pendingSharesByAsset for all registered assets
+     * @dev Used to determine available shares for new withdrawals
+     * @dev Per-asset tracking enables concurrent withdrawals without accounting collisions
+     *
+     * @return total Sum of pending shares across all assets
+     *
+     * @custom:formula total = Σ(_pendingSharesByAsset[asset]) for all registered assets
+     * @custom:example
+     * Scenario: WETH withdrawal (100 shares) + ETHFI withdrawal (50 shares)
+     *   _pendingSharesByAsset[WETH] = 100
+     *   _pendingSharesByAsset[ETHFI] = 50
+     *   _calculateTotalPendingShares() = 150
+     *
+     * Algorithm:
+     * 1. Iterate through all registered assets (_assets array)
+     * 2. Sum _pendingSharesByAsset[asset] for each
+     * 3. Return total
+     */
+    function _calculateTotalPendingShares() internal view returns (uint256 total) {
+        for (uint256 i = 0; i < _assets.length; i++) {
+            total += _pendingSharesByAsset[_assets[i]];
+        }
+    }
+
+    /**
+     * @notice Adjust balance snapshots for queued operations after deposit/withdraw
+     * @dev Updates balanceSnapshot for both _queuedWithdraw and _queuedProfits if active
+     * @dev Called by deposit() (add amount) and withdraw() (subtract amount) to maintain accuracy
+     *
+     * @param _asset Asset address whose snapshots need adjustment
+     * @param _amount Amount to add (deposit) or subtract (withdraw) from snapshots
+     * @param _isDeposit true if deposit (add), false if withdraw (subtract)
+     *
+     * @custom:formula
+     *   On deposit: snapshot += amount (balance increased, adjust baseline up)
+     *   On withdraw: snapshot -= amount (balance decreased, adjust baseline down)
+     *
+     * @custom:example
+     *   State before: balance=100, snapshot=90, queued=50
+     *   deposit(20): balance=120, snapshot=110, queued=50 (still need 50 more to arrive)
+     *   withdraw(10): balance=110, snapshot=100, queued=50 (still need 50 more to arrive)
+     *
+     * Algorithm:
+     * 1. Check if _queuedWithdraw[_asset] is active (amount > 0)
+     * 2. If active: adjust balanceSnapshot by ± _amount
+     * 3. Repeat for _queuedProfits[_asset]
+     * 4. This maintains arrival detection accuracy across balance changes
+     */
+    function _adjustBalanceSnapshots(address _asset, uint256 _amount, bool _isDeposit) internal {
+        // Adjust _queuedWithdraw snapshot if active
+        if (_queuedWithdraw[_asset].amount > 0) {
+            if (_isDeposit) {
+                _queuedWithdraw[_asset].balanceSnapshot += _amount;
+            } else {
+                _queuedWithdraw[_asset].balanceSnapshot -= _amount;
+            }
+        }
+
+        // Adjust _queuedProfits snapshot if active
+        if (_queuedProfits[_asset].amount > 0) {
+            if (_isDeposit) {
+                _queuedProfits[_asset].balanceSnapshot += _amount;
+            } else {
+                _queuedProfits[_asset].balanceSnapshot -= _amount;
+            }
+        }
+    }
+
+    // ============================================
+    // Profit Calculation
+    // ============================================
+
+    /**
+     * @notice Calculate current profit (share value - principal deposits)
+     * @dev Profit = Current BoringVault share value - Total principal deposits (in ETH)
+     * @dev Returns 0 if at a loss (no negative profit)
+     * @dev Used by harvestProfits() to determine withdrawal amount
+     *
+     * @return profit Current profit in ETH terms (18 decimals)
+     *
+     * @custom:formula profit = max(0, shareValue - principalSum)
+     * @custom:example
+     * Scenario: 1000 ETHFI deposited → 500 shares @ 2.0 rate
+     *   Later: shares worth 1200 ETHFI @ 2.4 rate
+     *   Principal: 1000 ETHFI (in ETH via price provider)
+     *   Share Value: 1200 ETH (_calculateVaultShareValue)
+     *   Profit: 1200 - 1000 = 200 ETH
+     *
+     * Algorithm:
+     * 1. Calculate current share value in ETH
+     * 2. Sum all principal deposits across registered assets
+     * 3. Convert each asset principal to ETH using price provider
+     * 4. Return max(0, shareValue - principalSum)
+     */
+    function calculateProfit() public view returns (uint256 profit) {
+        // Get current BoringVault share value in ETH
+        uint256 currentValue = _calculateVaultShareValue();
+
+        // Calculate total principal across all registered assets
+        uint256 totalPrincipal = 0;
+
+        for (uint256 i = 0; i < _assets.length; i++) {
+            address asset = _assets[i];
+
+            // Skip unregistered assets
+            if (!_registeredTokens[asset]) continue;
+
+            // Get principal deposits (from parent KingVault)
+            uint256 deposited = _deposits[asset];
+
+            if (deposited == 0) continue;
+
+            // Get validated asset price in ETH (includes staleness and validity checks)
+            uint256 priceInEth = _getValidatedPrice(asset);
+
+            // Get asset decimals
+            uint8 decimals = IERC20Metadata(asset).decimals();
+
+            // Convert deposited amount to ETH
+            // principalInEth = deposited × priceInEth / (10^decimals)
+            uint256 principalInEth = Math.mulDiv(deposited, priceInEth, 10 ** decimals);
+
+            totalPrincipal += principalInEth;
+        }
+
+        // Calculate profit (or 0 if at a loss)
+        if (currentValue > totalPrincipal) {
+            profit = currentValue - totalPrincipal;
+        } else {
+            profit = 0; // No profit or at a loss
+        }
+
+        return profit;
+    }
+
+    /**
+     * @notice Harvest profits by queuing withdrawal of profit shares (Type B)
+     * @dev Owner-only function to initiate profit distribution cycle
+     * @dev Queues withdrawal for profit shares only (NOT principal)
+     * @dev DUAL TRACKING: Increments _queuedProfits[baseAsset] to protect from principal contamination
+     * @dev Does NOT modify _deposits (profit ≠ principal)
+     *
+     * @custom:validation Profit must be > 0
+     * @custom:validation Share value must be > 0
+     * @custom:validation Profit shares must be > 0
+     * @custom:validation No concurrent withdrawals for base asset
+     *
+     * Workflow:
+     * 1. Calculate current profit (shareValue - principal)
+     * 2. Calculate profit shares from current share balance
+     * 3. Get base asset from Accountant
+     * 4. Queue withdrawal for profit shares via internal helper
+     * 5. Increment _queuedProfits[baseAsset] (Type B tracking)
+     * 6. Emit events
+     *
+     * After solver fulfills:
+     * - Call distributeProfits() to send assets to recipients
+     * - distributeProfits() clears _queuedProfits tracking
+     *
+     * Example:
+     * ```solidity
+     * // Vault has 500 shares worth 1200 ETH, principal = 1000 ETH
+     * // Profit = 200 ETH = 16.67% of shareValue
+     * // Profit shares = 500 × 0.1667 = 83.33 shares
+     * // kingBoringVault.harvestProfits();
+     * // Queues 83.33 share withdrawal for ~200 WETH
+     * // _queuedProfits[WETH] = 200e18
+     * // _deposits[WETH] UNCHANGED (profit ≠ principal)
+     * ```
+     */
+    function harvestProfits() external override onlyOwner whenNotPaused nonReentrant {
+        // 1. Calculate current profit
+        uint256 profitInEth = calculateProfit();
+        if (profitInEth == 0) revert NoProfitToHarvest();
+
+        // 2. Get current share value
+        uint256 shareValue = _calculateVaultShareValue();
+        if (shareValue == 0) revert NoShareValue();
+
+        // 3. Get current share balance
+        uint256 currentShares = IERC20(vault).balanceOf(address(this));
+        if (currentShares == 0) revert NoShares();
+
+        // 4. Calculate profit shares
+        // profitShares = currentShares × profitInEth / shareValue
+        uint256 profitShares = Math.mulDiv(currentShares, profitInEth, shareValue);
+
+        // 5. Validate profit shares
+        if (profitShares == 0) revert NoProfitShares();
+        if (profitShares > currentShares) revert InvalidProfitCalculation();
+
+        // 6. Get base asset from Accountant
+        address baseAsset = IAccountantWithRateProviders(accountant).base();
+        if (baseAsset == address(0)) revert InvalidBaseAsset();
+
+        // 7. Check no pending withdrawal for base asset
+        if (_withdrawalRequests[baseAsset].deadline > 0) {
+            revert WithdrawalNotQueued();
+        }
+
+        // 8. Mutex protection: Cannot harvest profits if withdrawal is already queued
+        if (_queuedWithdraw[baseAsset].amount > 0) {
+            revert WithdrawalAlreadyQueued();
+        }
+
+        // 9. Calculate expected asset amount from profit shares
+        uint256 expectedAmount = _calculateExpectedAssets(baseAsset, profitShares);
+
+        // 10. DUAL TRACKING: Initialize queued profits with balance snapshot (Type B tracking)
+        uint256 currentBalance = IERC20(baseAsset).balanceOf(address(this));
+        _queuedProfits[baseAsset] = QueuedAmount({amount: expectedAmount, balanceSnapshot: currentBalance});
+
+        // 11. Queue withdrawal for profit shares (Type B)
+        // Uses internal helper to avoid modifying _queuedWithdraw
+        _queueProfitWithdrawal(baseAsset, profitShares, 0); // 0 = use default deadline
+
+        // 12. Emit events
+        emit ProfitsHarvested(block.timestamp); // Inherited from IKingVault
+        emit ProfitSharesQueued(profitShares, profitInEth);
+    }
+
+    /**
+     * @notice Internal helper to queue profit withdrawal (Type B)
+     * @dev Similar to withdrawFromVault() but for Type B (profit) withdrawals
+     * @dev Does NOT modify _deposits (profit ≠ principal)
+     * @dev Does NOT modify _queuedWithdraw (only Type A uses this)
+     * @dev Called by harvestProfits() after setting _queuedProfits
+     *
+     * @param _asset ERC-20 token address we want to receive
+     * @param _shareAmount BoringVault shares to withdraw
+     * @param _deadline Unix timestamp for request expiration (0 = use default)
+     *
+     * @custom:security No access control needed (internal function)
+     * @custom:security Assumes validation done by caller (harvestProfits)
+     */
+    function _queueProfitWithdrawal(address _asset, uint256 _shareAmount, uint64 _deadline) internal {
+        // Calculate and validate deadline with bounds checking
+        // Calculate deadline (use default if not provided)
+        uint64 deadline = _deadline == 0 ? uint64(block.timestamp) + withdrawalDuration : _deadline;
+
+        // Calculate expected asset amount from shares
+        uint256 expectedAmount = _calculateExpectedAssets(_asset, _shareAmount);
+
+        // Calculate atomic price with slippage protection
+        uint256 atomicPrice = _calculateAtomicPrice(_asset, _shareAmount, expectedAmount);
+
+        // Create AtomicRequest struct
+        IAtomicQueue.AtomicRequest memory request = IAtomicQueue.AtomicRequest({
+            deadline: deadline,
+            atomicPrice: uint88(atomicPrice),
+            offerAmount: uint96(_shareAmount),
+            inSolve: false
+        });
+
+        // SECURITY FIX (Slither): Use SafeERC20.forceApprove() instead of approve()
+        // Handles non-standard ERC20 tokens and prevents approval race conditions
+        SafeERC20.forceApprove(IERC20(vault), atomicQueue, _shareAmount);
+
+        // Queue withdrawal in AtomicQueue
+        IAtomicQueue(atomicQueue).updateAtomicRequest(
+            ERC20(vault), // offer: BoringVault shares
+            ERC20(_asset), // want: Asset we expect to receive
+            request
+        );
+
+        // Store withdrawal request details
+        _withdrawalRequests[_asset] = WithdrawalRequest({
+            asset: _asset,
+            offer: expectedAmount, // IN-TRANSIT ASSET TRACKING
+            want: _shareAmount,
+            deadline: deadline
+        });
+
+        // Update pending shares for this asset
+        _pendingSharesByAsset[_asset] += _shareAmount;
+
+        // NOTE: Does NOT modify _queuedWithdraw (only Type A uses this)
+        // NOTE: Does NOT modify _deposits (profit ≠ principal)
+        // NOTE: _queuedProfits already incremented by harvestProfits()
+
+        emit WithdrawalQueued(_asset, _shareAmount, expectedAmount, deadline);
+    }
+
+    /**
+     * @notice Distribute idle profits to recipients and clear queued profit tracking
+     * @dev Overrides parent KingVault.distributeProfits() to add _queuedProfits cleanup
+     * @dev Only callable by owner (governance multi-sig)
+     * @dev DUAL TRACKING: Clears _queuedProfits[asset] for all assets after distribution
+     *
+     * @custom:validation Executes parent distribution logic
+     * @custom:validation Clears Type B tracking after successful distribution
+     *
+     * Workflow:
+     * 1. Execute distribution logic (inherited from parent):
+     *    a. Calculate idle profit (balance - deposits)
+     *    b. Distribute to configured recipients
+     *    c. Emit ProfitsDistributed event
+     * 2. Clear _queuedProfits for all assets (Type B cleanup)
+     *
+     * Example:
+     * ```solidity
+     * // After solver fulfills profit harvest:
+     * // - 200 WETH arrived as idle balance
+     * // - _queuedProfits[WETH] = 200e18 (still tracked)
+     *
+     * // kingBoringVault.distributeProfits();
+     * // - Parent sends 200 WETH to recipients
+     * // - _queuedProfits[WETH] = 0 (cleared)
+     * // - Ready for next harvest cycle
+     * ```
+     */
+    function distributeProfits() external override onlyOwner whenNotPaused nonReentrant {
+        // Access control already verified by modifiers above
+
+        // Validate we have at least one recipient configured
+        if (_profitsRecipients.length == 0) {
+            revert InvalidAssetArray(); // No recipients configured
+        }
+
+        // Prepare event data structures
+        address[] memory distributedTokens = new address[](_assets.length);
+        uint256[] memory tokenTotalAmounts = new uint256[](_assets.length);
+        uint256 tokenCount = 0;
+
+        // 2D array for amounts per recipient per token
+        uint256[][] memory recipientAmounts = new uint256[][](_profitsRecipients.length);
+        for (uint256 i = 0; i < _profitsRecipients.length; i++) {
+            recipientAmounts[i] = new uint256[](_assets.length);
+        }
+
+        // Iterate through all assets
+        for (uint256 i = 0; i < _assets.length; i++) {
+            address token = _assets[i];
+
+            // Skip if token is not registered/accepted
+            if (!_registeredTokens[token]) {
+                continue;
+            }
+
+            // Get current balance and deposited principal
+            uint256 balance = IERC20(token).balanceOf(address(this));
+            uint256 principal = _deposits[token];
+
+            // Calculate profit (only distribute if balance > principal)
+            if (balance <= principal) {
+                continue; // No profit to distribute
+            }
+
+            uint256 profit = balance - principal;
+
+            // Track token for event
+            distributedTokens[tokenCount] = token;
+            tokenTotalAmounts[tokenCount] = profit;
+
+            // Distribute profit to each recipient
+            for (uint256 j = 0; j < _profitsRecipients.length; j++) {
+                address recipient = _profitsRecipients[j];
+                uint16 percentBPS = _profitsDistribution[recipient];
+
+                // Calculate recipient's share using mulDiv for precision
+                // share = (profit * percentBPS) / HUNDRED_PERCENT_IN_BPS
+                uint256 share = Math.mulDiv(profit, uint256(percentBPS), HUNDRED_PERCENT_IN_BPS);
+
+                // Transfer share to recipient (skip if share is 0)
+                if (share > 0) {
+                    SafeERC20.safeTransfer(IERC20(token), recipient, share);
+                    recipientAmounts[j][tokenCount] = share;
+                }
+            }
+
+            tokenCount++;
+        }
+
+        // Resize arrays to actual count (remove empty slots)
+        address[] memory finalTokens = new address[](tokenCount);
+        uint256[] memory finalTotalAmounts = new uint256[](tokenCount);
+        uint256[][] memory finalRecipientAmounts = new uint256[][](_profitsRecipients.length);
+
+        for (uint256 i = 0; i < tokenCount; i++) {
+            finalTokens[i] = distributedTokens[i];
+            finalTotalAmounts[i] = tokenTotalAmounts[i];
+        }
+
+        for (uint256 i = 0; i < _profitsRecipients.length; i++) {
+            finalRecipientAmounts[i] = new uint256[](tokenCount);
+            for (uint256 j = 0; j < tokenCount; j++) {
+                finalRecipientAmounts[i][j] = recipientAmounts[i][j];
+            }
+        }
+
+        // Emit event with distribution details
+        emit ProfitsDistributed(_profitsRecipients, finalTokens, finalRecipientAmounts, block.timestamp);
+
+        // DUAL TRACKING: Clear queued profits for all assets (Type B cleanup)
+        // After distribution completes, profit assets are no longer reserved
+        for (uint256 i = 0; i < _assets.length; i++) {
+            address asset = _assets[i];
+            if (_queuedProfits[asset].amount > 0) {
+                delete _queuedProfits[asset];
+            }
+        }
+    }
+
+    /**
+     * @notice Cancel pending profit harvest request (Type B)
+     * @dev Owner-only function to cancel unfulfilled profit withdrawal
+     * @dev DUAL TRACKING: Decrements _queuedProfits[_asset] to clear Type B tracking
+     * @dev Does NOT modify _deposits (profit was never counted as principal)
+     *
+     * @param _asset ERC-20 token address of profit harvest to cancel
+     *
+     * @custom:validation Queued profits must exist for asset
+     * @custom:validation Withdrawal request must exist
+     *
+     * Workflow:
+     * 1. Validate _queuedProfits[_asset] > 0
+     * 2. Get queued amount
+     * 3. Cancel AtomicQueue request (set to empty)
+     * 4. Decrement _queuedProfits[_asset] (clear Type B tracking)
+     * 5. Delete _withdrawalRequests[_asset]
+     * 6. Reset _pendingShares
+     * 7. Emit event
+     *
+     * CRITICAL: Does NOT restore _deposits (profit was never principal)
+     *
+     * Example:
+     * ```solidity
+     * // Profit harvest queued: 83 shares for 200 WETH
+     * // _queuedProfits[WETH] = 200e18
+     * // _deposits[WETH] = 1000e18 (unchanged)
+     *
+     * // Solver never fulfills, governance cancels:
+     * kingBoringVault.cancelProfitsHarvest(WETH);
+     *
+     * // - _queuedProfits[WETH] = 0 (cleared)
+     * // - _deposits[WETH] = 1000e18 (still unchanged)
+     * // - 83 shares restored to available pool
+     * ```
+     */
+    function cancelProfitsHarvest(address _asset) external onlyOwner whenNotPaused {
+        // Validate address parameter
+        if (_asset == address(0)) revert ZeroAddress();
+
+        // 1. Validate queued profits exist
+        uint256 queuedAmount = _queuedProfits[_asset].amount;
+        if (queuedAmount == 0) {
+            revert NoProfitsQueued();
+        }
+
+        // 2. Validate withdrawal request exists
+        WithdrawalRequest memory request = _withdrawalRequests[_asset];
+        if (request.deadline == 0) {
+            revert NoWithdrawalQueued();
+        }
+
+        // 3. Create empty AtomicRequest to cancel
+        IAtomicQueue.AtomicRequest memory emptyRequest =
+            IAtomicQueue.AtomicRequest({deadline: 0, atomicPrice: 0, offerAmount: 0, inSolve: false});
+
+        // 4. SECURITY FIX (Slither): Apply CEI pattern - Effects before Interactions
+        // Update state BEFORE external call to prevent reentrancy
+        delete _queuedProfits[_asset];
+
+        // Release pending shares for this asset only
+        _pendingSharesByAsset[_asset] -= request.want;
+
+        delete _withdrawalRequests[_asset];
+
+        // 5. Cancel withdrawal in AtomicQueue (EXTERNAL CALL)
+        IAtomicQueue(atomicQueue).updateAtomicRequest(
+            ERC20(vault), // offer: BoringVault shares
+            ERC20(_asset), // want: Asset
+            emptyRequest
+        );
+
+        // IMPORTANT: Does NOT modify _deposits (profit was never principal)
+        // Shares automatically restored (no internal tracking, use balanceOf())
+
+        // 8. Emit event
+        emit ProfitsHarvestCancelled(_asset, queuedAmount, block.timestamp);
+    }
+
+    // ============================================
+    // Configuration Functions
+    // ============================================
+
+    /**
+     * @notice Update maximum slippage tolerance for deposits
+     * @dev Only callable by owner, affects future deposit operations
+     * @dev Validates slippage does not exceed MAX_SLIPPAGE_LIMIT (10%)
+     *
+     * @param _slippageBPS New slippage tolerance in basis points (1 BPS = 0.01%)
+     *
+     * @custom:validation _slippageBPS must be <= MAX_SLIPPAGE_LIMIT (1000 BPS)
+     * @custom:example setMaxSlippage(100) sets 1% slippage tolerance
+     *
+     * Emits: MaxSlippageUpdated
+     *
+     * Example Usage:
+     * ```solidity
+     * // Increase slippage tolerance to 1%
+     * kingBoringVault.setMaxSlippage(100);
+     * ```
+     */
+    function setMaxSlippage(uint16 _slippageBPS) external onlyOwner whenNotPaused {
+        // Validate slippage within limit
+        if (_slippageBPS > MAX_SLIPPAGE_LIMIT) {
+            revert SlippageExceedsLimit(_slippageBPS, MAX_SLIPPAGE_LIMIT);
+        }
+
+        // Store old value for event
+        uint16 oldSlippage = maxSlippageBPS;
+
+        // Update slippage
+        maxSlippageBPS = _slippageBPS;
+
+        // Emit event
+        emit MaxSlippageUpdated(oldSlippage, _slippageBPS);
+    }
+
+    /**
+     * @notice Update AtomicQueue contract address for withdrawal operations
+     * @dev Only callable by owner when no withdrawals are pending
+     * @dev Validates address is not zero and no pending shares exist
+     *
+     * @param _atomicQueue New AtomicQueue contract address
+     *
+     * @custom:validation _atomicQueue must not be zero address
+     * @custom:validation _pendingShares must be zero (no active withdrawals)
+     * @custom:security Requires no pending withdrawals to prevent orphaned requests
+     *
+     * Emits: AtomicQueueUpdated
+     *
+     * Example Usage:
+     * ```solidity
+     * // Update to new AtomicQueue deployment
+     * address newQueue = 0x1234...5678;
+     * kingBoringVault.setAtomicQueue(newQueue);
+     * ```
+     */
+    function setAtomicQueue(address _atomicQueue) external onlyOwner whenNotPaused {
+        // Validate new address
+        if (_atomicQueue == address(0)) {
+            revert ZeroAddress();
+        }
+
+        // Require no pending withdrawals (check total across all assets)
+        if (_calculateTotalPendingShares() > 0) {
+            revert NoWithdrawalQueued(); // Indicates pending withdrawal blocks update
+        }
+
+        // Store old value for event
+        address oldQueue = atomicQueue;
+
+        // Update queue address
+        atomicQueue = _atomicQueue;
+
+        // Emit event
+        emit AtomicQueueUpdated(oldQueue, _atomicQueue);
+    }
+
+    /**
+     * @notice Update default withdrawal duration for new requests
+     * @dev Only callable by owner, affects future withdrawal deadline calculations
+     * @dev Does not affect existing pending withdrawals
+     *
+     * @param _duration New duration in seconds
+     *
+     * @custom:example setWithdrawalDuration(14 days) sets 2-week default
+     * @custom:note Existing pending withdrawals retain their original deadlines
+     *
+     * Emits: WithdrawalDurationUpdated
+     *
+     * Example Usage:
+     * ```solidity
+     * // Extend default duration to 14 days
+     * kingBoringVault.setWithdrawalDuration(14 days);
+     *
+     * // Reduce to 3 days for faster settlements
+     * kingBoringVault.setWithdrawalDuration(3 days);
+     * ```
+     */
+    function setWithdrawalDuration(uint64 _duration) external onlyOwner whenNotPaused {
+        // Store old value for event
+        uint64 oldDuration = withdrawalDuration;
+
+        // Update duration
+        withdrawalDuration = _duration;
+
+        // Emit event
+        emit WithdrawalDurationUpdated(oldDuration, _duration);
+    }
+
+    // ============================================
+    // View Functions
+    // ============================================
+
+    /**
+     * @notice Get total pending shares committed to withdrawal across all assets
+     * @dev Returns sum of shares locked in all active withdrawal requests
+     * @dev Sums _pendingSharesByAsset for all registered assets
+     * @return Total pending share amount (0 if no active withdrawals)
+     *
+     * Example Usage:
+     * ```solidity
+     * uint256 pending = kingBoringVault.getPendingShares();
+     * // If WETH withdrawal has 100 shares and ETHFI has 50 shares:
+     * // Returns: 150e18 (150 total shares queued)
+     * ```
+     */
+    function getPendingShares() external view returns (uint256) {
+        return _calculateTotalPendingShares();
+    }
+
+    /**
+     * @notice Get total BoringVault shares owned by this contract
+     * @dev Queries vault.balanceOf() directly
+     * @return Total share balance including pending withdrawals
+     *
+     * Example Usage:
+     * ```solidity
+     * uint256 totalShares = kingBoringVault.getVaultShares();
+     * uint256 availableShares = totalShares - kingBoringVault.getPendingShares();
+     * ```
+     */
+    function getVaultShares() external view returns (uint256) {
+        return IERC20(vault).balanceOf(address(this));
+    }
+
+    /**
+     * @notice Get withdrawal request details for specific asset
+     * @dev Returns struct with asset, offer, want, deadline
+     * @param _asset Asset address to query
+     * @return WithdrawalRequest struct (all fields zero if no request)
+     *
+     * Example Usage:
+     * ```solidity
+     * WithdrawalRequest memory request = kingBoringVault.getWithdrawalRequest(WETH);
+     * if (request.deadline > 0) {
+     *     // Active withdrawal exists
+     *     console.log("Expecting", request.offer, "WETH");
+     *     console.log("Offering", request.want, "shares");
+     * }
+     * ```
+     */
+    function getWithdrawalRequest(address _asset) external view returns (WithdrawalRequest memory) {
+        return _withdrawalRequests[_asset];
+    }
+
+    /**
+     * @notice Check if Teller is paused
+     * @dev Queries Teller.isPaused() to determine if deposits are blocked
+     * @return true if Teller is paused, false otherwise
+     *
+     * Example Usage:
+     * ```solidity
+     * if (boringVault.isTellerPaused()) {
+     *     // Cannot deposit, wait for unpause
+     * }
+     * ```
+     */
+    function isTellerPaused() external view returns (bool) {
+        return ITellerWithMultiAssetSupport(teller).isPaused();
+    }
+
+    /**
+     * @notice Check if Accountant is paused
+     * @dev Queries Accountant.isPaused() to determine if rate queries are blocked
+     * @return true if Accountant is paused, false otherwise
+     *
+     * Example Usage:
+     * ```solidity
+     * if (boringVault.isAccountantPaused()) {
+     *     // Cannot get rates, TVL calculation blocked
+     * }
+     * ```
+     */
+    function isAccountantPaused() external view returns (bool) {
+        return IAccountantWithRateProviders(accountant).isPaused();
+    }
+
+    /**
+     * @notice Get current exchange rate from Accountant
+     * @dev Returns rate in base asset denomination (e.g., ETH per share)
+     * @dev Uses unsafe getRate() for view function (gas efficient)
+     * @return Exchange rate with 18 decimals
+     *
+     * Example Usage:
+     * ```solidity
+     * uint256 rate = boringVault.getVaultRate();
+     * // Returns: 1.2e18 (1 share = 1.2 ETH)
+     * ```
+     */
+    function getVaultRate() external view returns (uint256) {
+        return IAccountantWithRateProviders(accountant).getRate();
+    }
+
+    // NOTE: tvl() function is inherited from parent KingVault
+    // It correctly uses _deposits mapping for principal-only TVL tracking
+    // Share appreciation does NOT affect TVL - it's tracked as profit separately
+    //
+    // IMPORTANT ACCOUNTING:
+    // - _deposits[asset] only changes when King main vault calls deposit()/withdraw()
+    // - Share value appreciation does NOT affect TVL
+    // - Profit = shareValue - principal (separate from TVL)
+    //
+    // Example: 1000 ETHFI deposited → 500 shares @ 2.0 rate
+    //   Later: shares worth 1200 ETHFI @ 2.4 rate
+    //   TVL remains 1000 ETHFI (principal only)
+    //   Profit = 1200 - 1000 = 200 ETHFI (NOT in TVL)
+
+    // ============================================
+    // UUPS Upgrade
+    // ============================================
+
+    /**
+     * @notice Authorization for contract upgrades is inherited from KingVaultStorage
+     * @dev KingVaultStorage._authorizeUpgrade() requires owner via _checkOwner()
+     * @dev No need to override - parent implementation is sufficient
+     */
+}
